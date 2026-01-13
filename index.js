@@ -236,7 +236,7 @@ async function onComfyDeleteWorkflowClick() {
     } catch (e) { toastr.error(e.message); }
 }
 
-/* --- WORKFLOW STUDIO (No Auto-Copy) --- */
+/* --- WORKFLOW STUDIO (Fixed Saving) --- */
 async function onComfyOpenWorkflowEditorClick() {
     const name = extension_settings[extensionName].currentWorkflowName;
     if (!name) return toastr.warning("No workflow selected");
@@ -271,13 +271,11 @@ async function onComfyOpenWorkflowEditorClick() {
             </div>
 
             <div style="display: flex; gap: 15px;">
-                <!-- Fixed Height -->
                 <textarea class="text_pole wf-textarea" spellcheck="false"
                     style="flex: 1; min-height: 600px; height: 600px; font-family: 'Consolas', 'Monaco', monospace; white-space: pre; resize: none; font-size: 13px; padding: 10px; line-height: 1.4;"></textarea>
 
                 <div style="width: 250px; flex-shrink: 0; display: flex; flex-direction: column; border-left: 1px solid var(--smart-border-color); padding-left: 10px; max-height: 600px;">
                     <h4 style="margin: 0 0 10px 0; opacity:0.8;">Placeholders</h4>
-                    <!-- Removed helper text -->
                     <div class="wf-list" style="overflow-y: auto; flex: 1; padding-right: 5px;"></div>
                 </div>
             </div>
@@ -304,16 +302,12 @@ async function onComfyOpenWorkflowEditorClick() {
                 'font-size': '12px',
                 'border': '1px solid transparent',
                 'transition': 'all 0.2s',
-                // Enabled text selection, default cursor
                 'cursor': 'text'
             });
 
         const $keySpan = $('<span></span>').text(item.key).css({'font-weight': 'bold', 'color': 'var(--smart-text-color)'});
         const $descSpan = $('<div></div>').text(item.desc).css({ 'font-size': '11px', 'opacity': '0.7', 'margin-top': '2px', 'font-family': 'sans-serif' });
         $itemDiv.append($keySpan).append($descSpan);
-
-        // NO CLICK EVENT
-
         $list.append($itemDiv);
     });
 
@@ -329,6 +323,7 @@ async function onComfyOpenWorkflowEditorClick() {
     $textarea.on('input', updateHighlights);
     setTimeout(updateHighlights, 100);
 
+    // Toolbar Actions
     $container.find('.wf-format').on('click', () => {
         try { $textarea.val(JSON.stringify(JSON.parse($textarea.val()), null, 4)); toastr.success("Formatted"); } catch(e) { toastr.warning("Invalid JSON"); }
     });
@@ -342,25 +337,40 @@ async function onComfyOpenWorkflowEditorClick() {
         try { JSON.parse($textarea.val()); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([$textarea.val()], {type:"application/json"})); a.download = name; a.click(); } catch(e) { toastr.warning("Invalid content"); }
     });
 
+    // --- CRITICAL FIX FOR SAVING ---
+    let contentToSave = null; // Variable to temporarily hold the data
+
     const onClosing = () => {
-        const content = $textarea.val();
-        try { JSON.parse(content); return content; } catch (e) { toastr.error("Invalid JSON"); return false; }
+        const val = $textarea.val();
+        try {
+            JSON.parse(val); // Validate JSON
+            contentToSave = val; // Capture it!
+            return true; // Allow closing
+        } catch (e) {
+            toastr.error("Invalid JSON code. Fix before saving.");
+            return false; // Prevent closing
+        }
     };
 
     const popup = new Popup($container, POPUP_TYPE.CONFIRM, '', { okButton: 'Save Changes', cancelButton: 'Cancel', wide: true, large: true, onClosing: onClosing });
 
-    await popup.show().then(async (result) => {
-        if (result && typeof result === 'string') {
-            try {
-                const res = await fetch('/api/sd/comfy/save-workflow', {
-                    method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ file_name: name, workflow: JSON.stringify(JSON.parse(result)) })
-                });
-                if (!res.ok) throw new Error(await res.text());
-                toastr.success("Saved!");
-            } catch (e) { toastr.error(e.message); }
+    const confirmed = await popup.show(); // Expecting Boolean (true = OK clicked)
+
+    if (confirmed === true && contentToSave) {
+        try {
+            // Minify for storage
+            const minified = JSON.stringify(JSON.parse(contentToSave));
+            const res = await fetch('/api/sd/comfy/save-workflow', {
+                method: 'POST', headers: getRequestHeaders(),
+                body: JSON.stringify({ file_name: name, workflow: minified })
+            });
+
+            if (!res.ok) throw new Error(await res.text());
+            toastr.success("Workflow Saved!");
+        } catch (e) {
+            toastr.error("Save Failed: " + e.message);
         }
-    });
+    }
 }
 
 
@@ -919,3 +929,4 @@ function applyWorkflowState(state) {
     $("#kazuma_lora_wt_3").val(s.selectedLoraWt3); $("#kazuma_lora_wt_display_3").text(s.selectedLoraWt3);
     $("#kazuma_lora_wt_4").val(s.selectedLoraWt4); $("#kazuma_lora_wt_display_4").text(s.selectedLoraWt4);
 }
+
