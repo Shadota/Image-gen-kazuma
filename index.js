@@ -5,7 +5,7 @@ import { saveBase64AsFile } from "../../../utils.js";
 import { humanizedDateTime } from "../../../RossAscends-mods.js";
 import { Popup, POPUP_TYPE } from "../../../popup.js";
 
-const extensionName = "image-gen-kazuma";
+const extensionName = "Image-gen-kazuma";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 // --- UPDATED CONSTANTS (With Dscriptions) ---
@@ -941,4 +941,5 @@ function applyWorkflowState(state) {
     $("#kazuma_lora_wt_3").val(s.selectedLoraWt3); $("#kazuma_lora_wt_display_3").text(s.selectedLoraWt3);
     $("#kazuma_lora_wt_4").val(s.selectedLoraWt4); $("#kazuma_lora_wt_display_4").text(s.selectedLoraWt4);
 }
+
 
