@@ -40,37 +40,26 @@
                     <input type="number" id="kazuma_auto_freq" class="text_pole" style="width: 60px" min="1" value="1"/>
                 </div>
 
-                <hr style="opacity:0.2; margin: 10px 0;">
+            </div>
 
-                <div class="kazuma-sub-label">Prompt Generator Preset</div>
+            <!-- Group: Tag Generation API -->
+            <div class="kazuma-group">
+                <div class="kazuma-header"><i class="fa-solid fa-robot"></i> Tag Generation API</div>
 
-                <select id="kazuma_profile_strategy" class="text_pole" style="width:100%; margin-bottom: 5px;">
-                    <option value="current">Use Current Active Preset</option>
-                    <option value="specific">Use Specific Preset...</option>
-                </select>
+                <div class="kazuma-sub-label">API Endpoint</div>
+                <input id="kazuma_tag_endpoint" type="text" class="text_pole" style="width:100%; margin-bottom:8px;"
+                       placeholder="https://api.openai.com/v1/chat/completions">
 
-                <!-- 1. Specific Profile List (Shown ONLY if 'specific') -->
-                <select id="kazuma_profile" class="text_pole" style="width:100%; display:none;"></select>
+                <div class="kazuma-sub-label">API Key</div>
+                <input id="kazuma_tag_api_key" type="password" class="text_pole" style="width:100%; margin-bottom:8px;"
+                       placeholder="sk-...">
 
-                <!-- 2. NEW: Prompt Builder (Shown ONLY if 'current') -->
-                <div id="kazuma_prompt_builder" style="display:none; background:rgba(0,0,0,0.2); padding:10px; border-radius:5px; margin-top:5px; border-left: 2px solid var(--smart-text-color);">
-                    <div class="kazuma-sub-label" style="margin-top:0;">Model Style (Format)</div>
-                    <select id="kazuma_prompt_style" class="text_pole" style="width:100%; margin-bottom:8px;">
-                        <option value="standard">Standard (Descriptive)</option>
-                        <option value="illustrious">Illustrious / Pony (Booru Tags)</option>
-                        <option value="sdxl">SDXL / Realistic (Natural Prose)</option>
-                    </select>
+                <div class="kazuma-sub-label">Model</div>
+                <input id="kazuma_tag_model" type="text" class="text_pole" style="width:100%; margin-bottom:8px;"
+                       placeholder="gpt-4o-mini">
 
-                    <div class="kazuma-sub-label" style="margin-top:0;">Camera Perspective</div>
-                    <select id="kazuma_prompt_persp" class="text_pole" style="width:100%; margin-bottom:8px;">
-                        <option value="scene">Cinematic Scene (Environmental)</option>
-                        <option value="pov">First Person (POV)</option>
-                        <option value="character">Character Focus (Portrait)</option>
-                    </select>
-
-                    <div class="kazuma-sub-label" style="margin-top:0;">Extra Instructions</div>
-                    <input type="text" id="kazuma_prompt_extra" class="text_pole" style="width:100%" placeholder="e.g. moody lighting, dark atmosphere...">
-                </div>
+                <div class="kazuma-sub-label">Prompt Preset</div>
+                <select id="kazuma_tag_preset" class="text_pole" style="width:100%;"></select>
             </div>
 
             <!-- Group 3: ComfyUI Connection -->

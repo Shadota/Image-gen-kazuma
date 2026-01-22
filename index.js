@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 import { extension_settings, getContext } from "../../../extensions.js";
-import { saveSettingsDebounced, generateQuietPrompt, saveChat, reloadCurrentChat, eventSource, event_types, addOneMessage, getRequestHeaders, appendMediaToMessage } from "../../../../script.js";
+import { saveSettingsDebounced, saveChat, reloadCurrentChat, eventSource, event_types, addOneMessage, getRequestHeaders, appendMediaToMessage } from "../../../../script.js";
 import { saveBase64AsFile } from "../../../utils.js";
 import { humanizedDateTime } from "../../../RossAscends-mods.js";
 import { Popup, POPUP_TYPE } from "../../../popup.js";
@@ -61,7 +61,6 @@ const defaultSettings = {
     enabled: true,
     debugPrompt: false,
     comfyUrl: "http://127.0.0.1:8188",
-    connectionProfile: "",
     currentWorkflowName: "", // Server manages this now
     selectedModel: "",
     selectedLora: "",
@@ -84,12 +83,12 @@ const defaultSettings = {
     cfg: 7.0,
     denoise: 0.5,
     clipSkip: 1,
-    profileStrategy: "current",
-    promptStyle: "standard",      
-    promptPerspective: "scene",   
-    promptExtra: "",              
-    connectionProfile: "",
-    savedWorkflowStates: {}  
+    // Tag Generation API Settings
+    tagApiEndpoint: "",
+    tagApiKey: "",
+    tagModel: "",
+    tagPreset: "Default",
+    savedWorkflowStates: {}
 };
 
 async function loadSettings() {
@@ -107,10 +106,11 @@ async function loadSettings() {
     $("#kazuma_height").val(extension_settings[extensionName].imgHeight);
     $("#kazuma_auto_enable").prop("checked", extension_settings[extensionName].autoGenEnabled);
     $("#kazuma_auto_freq").val(extension_settings[extensionName].autoGenFreq);
-	
-    $("#kazuma_prompt_style").val(extension_settings[extensionName].promptStyle || "standard");
-    $("#kazuma_prompt_persp").val(extension_settings[extensionName].promptPerspective || "scene");
-    $("#kazuma_prompt_extra").val(extension_settings[extensionName].promptExtra || "");
+
+    // Tag API Settings
+    $("#kazuma_tag_endpoint").val(extension_settings[extensionName].tagApiEndpoint || "");
+    $("#kazuma_tag_api_key").val(extension_settings[extensionName].tagApiKey || "");
+    $("#kazuma_tag_model").val(extension_settings[extensionName].tagModel || "");
 
     $("#kazuma_lora_wt").val(extension_settings[extensionName].selectedLoraWt);
     $("#kazuma_lora_wt_display").text(extension_settings[extensionName].selectedLoraWt);
@@ -124,9 +124,6 @@ async function loadSettings() {
     $("#kazuma_negative").val(extension_settings[extensionName].customNegative);
     $("#kazuma_seed").val(extension_settings[extensionName].customSeed);
     $("#kazuma_compress").prop("checked", extension_settings[extensionName].compressImages);
-	
-	$("#kazuma_profile_strategy").val(extension_settings[extensionName].profileStrategy || "current");
-toggleProfileVisibility();
 
     updateSliderInput('kazuma_steps', 'kazuma_steps_val', extension_settings[extensionName].steps);
     updateSliderInput('kazuma_cfg', 'kazuma_cfg_val', extension_settings[extensionName].cfg);
@@ -134,23 +131,9 @@ toggleProfileVisibility();
     updateSliderInput('kazuma_clip', 'kazuma_clip_val', extension_settings[extensionName].clipSkip);
 
     populateResolutions();
-    populateProfiles();
     populateWorkflows();
     await fetchComfyLists();
-}
-
-function toggleProfileVisibility() {
-    const strategy = extension_settings[extensionName].profileStrategy;
-
-    // Always show the builder now!
-    $("#kazuma_prompt_builder").show();
-
-    // Only toggle the preset selector
-    if (strategy === "specific") {
-        $("#kazuma_profile").show();
-    } else {
-        $("#kazuma_profile").hide();
-    }
+    await populateTagPresets();
 }
 
 function updateSliderInput(sliderId, numberId, value) {
@@ -442,61 +425,153 @@ async function onTestConnection() {
     } catch (error) { toastr.error(`Connection failed: ${error.message}`, "Image Gen Kazuma"); }
 }
 
+/* --- TAG API PRESET FUNCTIONS --- */
+async function loadTagPresets() {
+    try {
+        const response = await fetch('/api/presets/openai', {
+            method: 'GET',
+            headers: getRequestHeaders()
+        });
+        if (response.ok) {
+            const presets = await response.json();
+            return presets;
+        }
+    } catch (e) {
+        console.warn(`[${extensionName}] Failed to fetch OpenAI presets:`, e);
+    }
+    return [];
+}
+
+async function loadPresetConfig(presetName) {
+    try {
+        const response = await fetch(`/api/presets/openai/${encodeURIComponent(presetName)}`, {
+            method: 'GET',
+            headers: getRequestHeaders()
+        });
+        if (response.ok) {
+            return await response.json();
+        }
+    } catch (e) {
+        console.warn(`[${extensionName}] Failed to load preset ${presetName}:`, e);
+    }
+    return null;
+}
+
+async function populateTagPresets() {
+    const presets = await loadTagPresets();
+    const $dropdown = $("#kazuma_tag_preset");
+    $dropdown.empty();
+    $dropdown.append('<option value="">-- Select Preset --</option>');
+
+    for (const preset of presets) {
+        const name = typeof preset === 'object' ? preset.name : preset;
+        $dropdown.append(`<option value="${name}">${name}</option>`);
+    }
+
+    if (extension_settings[extensionName].tagPreset) {
+        $dropdown.val(extension_settings[extensionName].tagPreset);
+    }
+}
+
+async function generateTagsWithCustomApi(sceneText) {
+    const s = extension_settings[extensionName];
+
+    // Validate configuration
+    if (!s.tagApiEndpoint || !s.tagApiKey || !s.tagModel) {
+        throw new Error("Tag API not configured. Please set endpoint, API key, and model.");
+    }
+
+    // Load preset configuration
+    let preset = null;
+    if (s.tagPreset) {
+        preset = await loadPresetConfig(s.tagPreset);
+    }
+
+    // Build messages array
+    const messages = [];
+
+    // Extract system prompts from preset and replace macros
+    const charName = getContext().name2 || 'Character';
+
+    if (preset && preset.prompts && Array.isArray(preset.prompts)) {
+        const systemPrompts = preset.prompts
+            .filter(p => p.enabled !== false && p.content)
+            .map(p => ({
+                role: p.role || 'system',
+                content: p.content.replace(/\{\{char\}\}/gi, charName)
+            }));
+        messages.push(...systemPrompts);
+    }
+
+    // Add user message with scene text
+    messages.push({ role: 'user', content: sceneText });
+
+    // Handle assistant prefill if present in preset
+    if (preset && preset.assistant_prefill) {
+        const prefill = preset.assistant_prefill.replace(/\{\{char\}\}/gi, charName);
+        messages.push({ role: 'assistant', content: prefill });
+    }
+
+    // Build request body
+    const requestBody = {
+        model: s.tagModel,
+        messages: messages,
+        max_tokens: (preset && preset.openai_max_tokens) || 300,
+        temperature: (preset && preset.temperature) || 0.7,
+        top_p: (preset && preset.top_p) || 1,
+        frequency_penalty: (preset && preset.frequency_penalty) || 0,
+        presence_penalty: (preset && preset.presence_penalty) || 0
+    };
+
+    // Make API request
+    const response = await fetch(s.tagApiEndpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${s.tagApiKey}`
+        },
+        body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Tag API request failed (${response.status}): ${error}`);
+    }
+
+    const data = await response.json();
+    let result = data.choices[0].message.content;
+
+    // Prepend prefill to response if it was used (some APIs continue from prefill)
+    if (preset && preset.assistant_prefill && !result.startsWith(preset.assistant_prefill)) {
+        const prefill = preset.assistant_prefill.replace(/\{\{char\}\}/gi, charName);
+        result = prefill + result;
+    }
+
+    return result;
+}
+
 /* --- UPDATED GENERATION LOGIC --- */
 async function onGeneratePrompt() {
     if (!extension_settings[extensionName].enabled) return;
     const context = getContext();
     if (!context.chat || context.chat.length === 0) return toastr.warning("No chat history.");
 
-    const strategy = extension_settings[extensionName].profileStrategy || "current";
-    const requestProfile = extension_settings[extensionName].connectionProfile;
-    const targetDropdown = $("#settings_preset_openai");
-    const originalProfile = targetDropdown.val();
-    let didSwitch = false;
+    const s = extension_settings[extensionName];
 
-    if (strategy === "specific" && requestProfile && requestProfile !== originalProfile && requestProfile !== "") {
-        toastr.info(`Switching presets...`);
-        targetDropdown.val(requestProfile).trigger("change");
-        await new Promise(r => setTimeout(r, 1000));
-        didSwitch = true;
+    // Validate API configuration
+    if (!s.tagApiEndpoint || !s.tagApiKey || !s.tagModel) {
+        toastr.error("Tag API not configured. Please set endpoint, API key, and model.");
+        return;
     }
 
     // [START PROGRESS]
-    showKazumaProgress("Generating Prompt...");
+    showKazumaProgress("Generating Tags...");
 
     try {
         toastr.info("Visualizing...", "Image Gen Kazuma");
         const lastMessage = context.chat[context.chat.length - 1].mes;
-        const s = extension_settings[extensionName];
 
-        const style = s.promptStyle || "standard";
-        const persp = s.promptPerspective || "scene";
-        const extra = s.promptExtra ? `, ${s.promptExtra}` : "";
-
-        let styleInst = "", perspInst = "";
-        if (style === "illustrious") styleInst = "Use Booru-style tags (e.g., 1girl, solo, blue hair). Focus on anime aesthetics.";
-        else if (style === "sdxl") styleInst = "Use natural language sentences. Focus on photorealism and detailed textures.";
-        else styleInst = "Use a list of detailed keywords/descriptors.";
-
-        if (persp === "pov") perspInst = "Describe the scene from a First Person (POV) perspective, looking at the character.";
-        else if (persp === "character") perspInst = "Focus intensely on the character's appearance and expression, ignoring background details.";
-        else perspInst = "Describe the entire environment and atmosphere.";
-
-        const instruction = `
-            Task: Write an image generation prompt for the following scene.
-            Scene: "${lastMessage}"
-            Style Constraint: ${styleInst}
-            Perspective: ${perspInst}
-            Additional Req: ${extra}
-            Output ONLY the prompt text.
-            `;
-
-        let generatedText = await generateQuietPrompt(instruction, true);
-
-        if (didSwitch) {
-            targetDropdown.val(originalProfile).trigger("change");
-            await new Promise(r => setTimeout(r, 500));
-        }
+        let generatedText = await generateTagsWithCustomApi(lastMessage);
 
         if (s.debugPrompt) {
             // Hide progress while user is confirming
@@ -529,9 +604,8 @@ async function onGeneratePrompt() {
     } catch (err) {
         // [HIDE PROGRESS ON ERROR]
         hideKazumaProgress();
-        if (didSwitch) targetDropdown.val(originalProfile).trigger("change");
         console.error(err);
-        toastr.error("Generation failed. Check console.");
+        toastr.error(`Generation failed: ${err.message}`);
     }
 }
 
@@ -764,9 +838,14 @@ jQuery(async () => {
         $("#kazuma_enable").on("change", (e) => { extension_settings[extensionName].enabled = $(e.target).prop("checked"); saveSettingsDebounced(); });
         $("#kazuma_debug").on("change", (e) => { extension_settings[extensionName].debugPrompt = $(e.target).prop("checked"); saveSettingsDebounced(); });
         $("#kazuma_url").on("input", (e) => { extension_settings[extensionName].comfyUrl = $(e.target).val(); saveSettingsDebounced(); });
-        $("#kazuma_profile").on("change", (e) => { extension_settings[extensionName].connectionProfile = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_auto_enable").on("change", (e) => { extension_settings[extensionName].autoGenEnabled = $(e.target).prop("checked"); saveSettingsDebounced(); });
         $("#kazuma_auto_freq").on("input", (e) => { let v = parseInt($(e.target).val()); if(v<1)v=1; extension_settings[extensionName].autoGenFreq = v; saveSettingsDebounced(); });
+
+        // Tag Generation API event handlers
+        $("#kazuma_tag_endpoint").on("input", (e) => { extension_settings[extensionName].tagApiEndpoint = $(e.target).val(); saveSettingsDebounced(); });
+        $("#kazuma_tag_api_key").on("input", (e) => { extension_settings[extensionName].tagApiKey = $(e.target).val(); saveSettingsDebounced(); });
+        $("#kazuma_tag_model").on("input", (e) => { extension_settings[extensionName].tagModel = $(e.target).val(); saveSettingsDebounced(); });
+        $("#kazuma_tag_preset").on("change", (e) => { extension_settings[extensionName].tagPreset = $(e.target).val(); saveSettingsDebounced(); });
 
         // SMART WORKFLOW SWITCHER
         $("#kazuma_workflow_list").on("change", (e) => {
@@ -794,16 +873,6 @@ jQuery(async () => {
             saveSettingsDebounced();
         });
         $("#kazuma_import_btn").on("click", () => $("#kazuma_import_file").click());
-
-        // New Logic Events
-        $("#kazuma_prompt_style").on("change", (e) => { extension_settings[extensionName].promptStyle = $(e.target).val(); saveSettingsDebounced(); });
-        $("#kazuma_prompt_persp").on("change", (e) => { extension_settings[extensionName].promptPerspective = $(e.target).val(); saveSettingsDebounced(); });
-        $("#kazuma_prompt_extra").on("input", (e) => { extension_settings[extensionName].promptExtra = $(e.target).val(); saveSettingsDebounced(); });
-        $("#kazuma_profile_strategy").on("change", (e) => {
-            extension_settings[extensionName].profileStrategy = $(e.target).val();
-            toggleProfileVisibility();
-            saveSettingsDebounced();
-        });
 
         $("#kazuma_new_workflow").on("click", onComfyNewWorkflowClick);
         $("#kazuma_edit_workflow").on("click", onComfyOpenWorkflowEditorClick);
@@ -868,7 +937,6 @@ jQuery(async () => {
 // Helpers (Condensed)
 function onMessageReceived(id) { if (!extension_settings[extensionName].enabled || !extension_settings[extensionName].autoGenEnabled) return; const chat = getContext().chat; if (!chat || !chat.length) return; if (chat[chat.length - 1].is_user || chat[chat.length - 1].is_system) return; const aiMsgCount = chat.filter(m => !m.is_user && !m.is_system).length; const freq = parseInt(extension_settings[extensionName].autoGenFreq) || 1; if (aiMsgCount % freq === 0) { console.log(`[${extensionName}] Auto-gen...`); setTimeout(onGeneratePrompt, 500); } }
 function createChatButton() { if ($("#kazuma_quick_gen").length > 0) return; const b = `<div id="kazuma_quick_gen" class="interactable" title="Visualize" style="cursor: pointer; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; margin-right: 5px; opacity: 0.7;"><i class="fa-solid fa-paintbrush fa-lg"></i></div>`; let t = $("#send_but_sheld"); if (!t.length) t = $("#send_textarea"); if (t.length) { t.attr("id") === "send_textarea" ? t.before(b) : t.prepend(b); } }
-function populateProfiles() { const s=$("#kazuma_profile"),o=$("#settings_preset_openai").find("option");s.empty().append('<option value="">-- Use Current Settings --</option>');if(o.length)o.each(function(){s.append(`<option value="${$(this).val()}">${$(this).text()}</option>`)});if(extension_settings[extensionName].connectionProfile)s.val(extension_settings[extensionName].connectionProfile);}
 async function onFileSelected(e) { const f=e.target.files[0];if(!f)return;const t=await f.text();try{const j=JSON.parse(t),n=prompt("Name:",f.name.replace(".json",""));if(n){extension_settings[extensionName].savedWorkflows[n]=j;extension_settings[extensionName].currentWorkflowName=n;saveSettingsDebounced();populateWorkflows();}}catch{toastr.error("Invalid JSON");}$(e.target).val('');}
 function showKazumaProgress(text = "Processing...") {
     $("#kazuma_progress_text").text(text);
@@ -893,10 +961,6 @@ function getWorkflowState() {
         imgHeight: s.imgHeight,
         customSeed: s.customSeed,
         customNegative: s.customNegative,
-        // Smart Prompts
-        promptStyle: s.promptStyle,
-        promptPerspective: s.promptPerspective,
-        promptExtra: s.promptExtra,
         // LoRAs
         selectedLora: s.selectedLora, selectedLoraWt: s.selectedLoraWt,
         selectedLora2: s.selectedLora2, selectedLoraWt2: s.selectedLoraWt2,
@@ -923,11 +987,6 @@ function applyWorkflowState(state) {
     $("#kazuma_height").val(s.imgHeight);
     $("#kazuma_seed").val(s.customSeed);
     $("#kazuma_negative").val(s.customNegative);
-
-    // Smart Prompt UI
-    $("#kazuma_prompt_style").val(s.promptStyle || "standard");
-    $("#kazuma_prompt_persp").val(s.promptPerspective || "scene");
-    $("#kazuma_prompt_extra").val(s.promptExtra || "");
 
     // LoRA UI
     $("#kazuma_lora_list").val(s.selectedLora);
