@@ -87,7 +87,6 @@ const defaultSettings = {
     tagApiEndpoint: "",
     tagApiKey: "",
     tagModel: "",
-    tagPreset: "Default",
     savedWorkflowStates: {}
 };
 
@@ -133,7 +132,6 @@ async function loadSettings() {
     populateResolutions();
     populateWorkflows();
     await fetchComfyLists();
-    populateTagPresets();
 }
 
 function updateSliderInput(sliderId, numberId, value) {
@@ -425,28 +423,36 @@ async function onTestConnection() {
     } catch (error) { toastr.error(`Connection failed: ${error.message}`, "Image Gen Kazuma"); }
 }
 
-/* --- TAG API PRESET FUNCTIONS --- */
-function populateTagPresets() {
-    const $dropdown = $("#kazuma_tag_preset");
-    const $stPresets = $("#settings_preset_openai").find("option");
+/* --- TAG GENERATION CONFIG (Hardcoded) --- */
+const TAG_GEN_CONFIG = {
+    temperature: 0.6,
+    top_p: 0.85,
+    frequency_penalty: 0,
+    presence_penalty: 1.5,
+    max_tokens: 1000,
+    systemPrompt: `You are a Danbooru/Booru tag generator for AI image generation. Your task is to output ONLY comma-separated booru tags based on the scene described in the chat.
 
-    $dropdown.empty();
-    $dropdown.append('<option value="">-- Use Current Settings --</option>');
+RULES:
+1. ALWAYS start with: {{char}}
+2. Keep tags MINIMAL (8-15 tags maximum)
+3. Focus ONLY on:
+   - Background/setting (e.g., beach, bedroom, forest, city)
+   - Emotion/expression (e.g., smile, blush, surprised, angry)
+   - Clothing ONLY if different from character's default (e.g., swimsuit, pajamas, formal_dress)
+   - Pose if clearly described (e.g., sitting, standing, lying_down)
+   - Time of day if relevant (e.g., night, sunset)
+4. DO NOT include:
+   - Character appearance tags (hair color, eye color, body features) - the LoRA handles this
+   - Quality tags (masterpiece, best quality) - added separately
+   - Artist tags
+5. Use underscores for multi-word tags (e.g., long_hair, blue_sky)
+6. Output ONLY the tags, nothing else. No explanations, no formatting.
 
-    if ($stPresets.length) {
-        $stPresets.each(function() {
-            const val = $(this).val();
-            const text = $(this).text();
-            if (val) { // Skip empty options
-                $dropdown.append(`<option value="${val}">${text}</option>`);
-            }
-        });
-    }
-
-    if (extension_settings[extensionName].tagPreset) {
-        $dropdown.val(extension_settings[extensionName].tagPreset);
-    }
-}
+Example output:
+{{char}}, beach, swimsuit, bikini, smile, standing, blue_sky, ocean, sunny`,
+    jailbreakPrompt: "Based on the latest message in the chat history, generate booru tags for the current scene. Output ONLY the comma-separated tags, starting with {{char}}.",
+    assistantPrefill: "{{char}}, "
+};
 
 async function generateTagsWithCustomApi(sceneText) {
     const s = extension_settings[extensionName];
@@ -456,53 +462,38 @@ async function generateTagsWithCustomApi(sceneText) {
         throw new Error("Tag API not configured. Please set endpoint and model.");
     }
 
-    // Switch to selected preset if specified (this loads preset settings into ST's state)
-    const originalPreset = $("#settings_preset_openai").val();
-    if (s.tagPreset) {
-        $("#settings_preset_openai").val(s.tagPreset).trigger("change");
-        // Small delay to let ST load the preset
-        await new Promise(resolve => setTimeout(resolve, 100));
-    }
-
     // Get character name for macro replacement
     const charName = getContext().name2 || 'Character';
 
-    // Access ST's loaded preset settings via oai_settings global
-    const oaiSettings = window.oai_settings || {};
+    // Build messages array using hardcoded config
+    const messages = [
+        {
+            role: 'system',
+            content: TAG_GEN_CONFIG.systemPrompt.replace(/\{\{char\}\}/gi, charName)
+        },
+        {
+            role: 'user',
+            content: sceneText
+        },
+        {
+            role: 'system',
+            content: TAG_GEN_CONFIG.jailbreakPrompt.replace(/\{\{char\}\}/gi, charName)
+        }
+    ];
 
-    // Build messages array
-    const messages = [];
+    // Add assistant prefill
+    const prefill = TAG_GEN_CONFIG.assistantPrefill.replace(/\{\{char\}\}/gi, charName);
+    messages.push({ role: 'assistant', content: prefill });
 
-    // Extract prompts from ST's current state
-    if (oaiSettings.prompts && Array.isArray(oaiSettings.prompts)) {
-        const systemPrompts = oaiSettings.prompts
-            .filter(p => p.content && p.content.trim())
-            .map(p => ({
-                role: p.role || 'system',
-                content: p.content.replace(/\{\{char\}\}/gi, charName)
-            }));
-        messages.push(...systemPrompts);
-    }
-
-    // Add user message with scene text
-    messages.push({ role: 'user', content: sceneText });
-
-    // Handle assistant prefill
-    const prefill = oaiSettings.assistant_prefill || '';
-    if (prefill) {
-        const processedPrefill = prefill.replace(/\{\{char\}\}/gi, charName);
-        messages.push({ role: 'assistant', content: processedPrefill });
-    }
-
-    // Build request body using ST's loaded settings
+    // Build request body using hardcoded settings
     const requestBody = {
         model: s.tagModel,
         messages: messages,
-        max_tokens: oaiSettings.openai_max_tokens || 300,
-        temperature: oaiSettings.temperature ?? 0.7,
-        top_p: oaiSettings.top_p ?? 1,
-        frequency_penalty: oaiSettings.frequency_penalty ?? 0,
-        presence_penalty: oaiSettings.presence_penalty ?? 0
+        max_tokens: TAG_GEN_CONFIG.max_tokens,
+        temperature: TAG_GEN_CONFIG.temperature,
+        top_p: TAG_GEN_CONFIG.top_p,
+        frequency_penalty: TAG_GEN_CONFIG.frequency_penalty,
+        presence_penalty: TAG_GEN_CONFIG.presence_penalty
     };
 
     // Make API request
@@ -517,11 +508,6 @@ async function generateTagsWithCustomApi(sceneText) {
         body: JSON.stringify(requestBody)
     });
 
-    // Restore original preset
-    if (s.tagPreset && originalPreset !== s.tagPreset) {
-        $("#settings_preset_openai").val(originalPreset).trigger("change");
-    }
-
     if (!response.ok) {
         const error = await response.text();
         throw new Error(`Tag API request failed (${response.status}): ${error}`);
@@ -534,8 +520,8 @@ async function generateTagsWithCustomApi(sceneText) {
     result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
     // Prepend prefill to response if it was used
-    if (prefill && !result.startsWith(prefill.replace(/\{\{char\}\}/gi, charName))) {
-        result = prefill.replace(/\{\{char\}\}/gi, charName) + result;
+    if (!result.startsWith(prefill)) {
+        result = prefill + result;
     }
 
     return result;
@@ -836,7 +822,6 @@ jQuery(async () => {
         $("#kazuma_tag_endpoint").on("input", (e) => { extension_settings[extensionName].tagApiEndpoint = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_api_key").on("input", (e) => { extension_settings[extensionName].tagApiKey = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_model").on("input", (e) => { extension_settings[extensionName].tagModel = $(e.target).val(); saveSettingsDebounced(); });
-        $("#kazuma_tag_preset").on("change", (e) => { extension_settings[extensionName].tagPreset = $(e.target).val(); saveSettingsDebounced(); });
 
         // SMART WORKFLOW SWITCHER
         $("#kazuma_workflow_list").on("change", (e) => {
