@@ -516,8 +516,12 @@ async function generateTagsWithCustomApi(sceneText) {
     const data = await response.json();
     let result = data.choices[0].message.content;
 
-    // Strip thinking/reasoning tags (e.g., <think>...</think>)
+    // Strip thinking/reasoning tags and any content before </think>
+    if (result.includes('</think>')) {
+        result = result.split('</think>').pop().trim();
+    }
     result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    result = result.replace(/<\/?think>/gi, '').trim();
 
     // Prepend prefill to response if it was used
     if (!result.startsWith(prefill)) {
