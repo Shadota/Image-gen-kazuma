@@ -452,8 +452,8 @@ async function generateTagsWithCustomApi(sceneText) {
     const s = extension_settings[extensionName];
 
     // Validate configuration
-    if (!s.tagApiEndpoint || !s.tagApiKey || !s.tagModel) {
-        throw new Error("Tag API not configured. Please set endpoint, API key, and model.");
+    if (!s.tagApiEndpoint || !s.tagModel) {
+        throw new Error("Tag API not configured. Please set endpoint and model.");
     }
 
     // Switch to selected preset if specified (this loads preset settings into ST's state)
@@ -506,12 +506,14 @@ async function generateTagsWithCustomApi(sceneText) {
     };
 
     // Make API request
+    const headers = { 'Content-Type': 'application/json' };
+    if (s.tagApiKey) {
+        headers['Authorization'] = `Bearer ${s.tagApiKey}`;
+    }
+
     const response = await fetch(s.tagApiEndpoint, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${s.tagApiKey}`
-        },
+        headers: headers,
         body: JSON.stringify(requestBody)
     });
 
@@ -545,8 +547,8 @@ async function onGeneratePrompt() {
     const s = extension_settings[extensionName];
 
     // Validate API configuration
-    if (!s.tagApiEndpoint || !s.tagApiKey || !s.tagModel) {
-        toastr.error("Tag API not configured. Please set endpoint, API key, and model.");
+    if (!s.tagApiEndpoint || !s.tagModel) {
+        toastr.error("Tag API not configured. Please set endpoint and model.");
         return;
     }
 
