@@ -442,7 +442,7 @@ Tags: sitting, bed, bedroom, blush, looking_away, indoors
 Example 2:
 *The ocean breeze catches her hair as she stands on the sandy shore, wearing a bright blue bikini. She spots you and waves enthusiastically, a radiant smile spreading across her face.*
 Tags: standing, beach, bikini, waving, smile, outdoors`,
-    jailbreakPrompt: "Tags:",
+    jailbreakPrompt: "Tags: /nothink",
     assistantPrefill: ""
 };
 
