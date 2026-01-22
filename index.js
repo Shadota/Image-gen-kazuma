@@ -964,14 +964,16 @@ function cleanTags(rawTags, charName) {
         .filter(t => !BAD_TAG_PATTERNS.some(pattern => pattern.test(t)))
         // Apply alias corrections
         .map(t => TAG_ALIASES[t] || t)
+        // Only keep valid booru tags
+        .filter(t => VALID_BOORU_TAGS.has(t))
         // Dedupe
         .filter((t, i, arr) => arr.indexOf(t) === i)
         // Max 15 tags
         .slice(0, 15);
 
-    // Always include 1girl after character name
+    // Always inject 1girl at the start
     if (!tags.includes('1girl')) {
-        tags.splice(1, 0, '1girl');
+        tags.unshift('1girl');
     }
 
     return tags.join(', ');
