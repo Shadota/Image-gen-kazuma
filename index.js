@@ -430,38 +430,19 @@ const TAG_GEN_CONFIG = {
     frequency_penalty: 0,
     presence_penalty: 1.5,
     max_tokens: 1000,
-    systemPrompt: `You generate Danbooru tags for images. Output ONLY comma-separated tags.
+    systemPrompt: `Generate danbooru tags for the scene. Output ONLY comma-separated tags.
 
-VALID TAG CATEGORIES:
-- Pose: sitting, standing, lying_down, kneeling, leaning_forward, arms_crossed, hand_on_hip, walking
-- Expression: smile, soft_smile, blush, angry, sad, surprised, crying, laughing, smirk, frown, open_mouth, closed_eyes, looking_away
-- Setting: indoors, outdoors, bedroom, bed, kitchen, beach, forest, city, office, classroom, chair, couch, window
-- Lighting/Time: night, sunset, sunrise, warm_lighting, dim_lighting
-- Clothing (only if specified): swimsuit, bikini, dress, pajamas, apron, towel, casual_clothes
-- Camera: close-up, portrait, full_body, from_above, from_below, from_side
+Include: pose, expression, setting, clothing (if changed)
+Exclude: hair/eye color, body features, abstract concepts
 
-WRONG vs CORRECT examples:
-- WRONG: blue_eyes, long_hair, pale_skin → CORRECT: (omit these, LoRA handles appearance)
-- WRONG: intimate_moment, feeling_warm, connection → CORRECT: (omit abstract concepts)
-- WRONG: circuitry_eyes, digital_glow, pink_glow → CORRECT: (omit made-up tags)
-- WRONG: contemplative, thoughtful_expression → CORRECT: thoughtful
-- WRONG: seated → CORRECT: sitting
-- WRONG: 3d_render, masterpiece → CORRECT: (omit quality/style tags)
-
-EXAMPLES:
-
-Scene: *She sits on the bed, blushing and looking away shyly*
+Example 1:
+*She settles onto the edge of the bed, her cheeks flushing a soft pink as she averts her gaze. The warmth of embarrassment spreads through her as she fidgets with the hem of her shirt, unable to meet your eyes.*
 Tags: sitting, bed, bedroom, blush, looking_away, indoors
 
-Scene: *Standing at the beach in a bikini, waving with a bright smile*
-Tags: standing, beach, bikini, waving, smile, ocean, outdoors, sunny
-
-Scene: *In the kitchen wearing an apron, focused on cooking*
-Tags: standing, kitchen, apron, indoors, focused
-
-Scene: *Lying on grass at sunset, gazing at clouds*
-Tags: lying_down, grass, sunset, outdoors, sky, from_side`,
-    jailbreakPrompt: "Output tags for the scene. Only visual elements. No appearance tags. No abstract concepts.",
+Example 2:
+*The ocean breeze catches her hair as she stands on the sandy shore, wearing a bright blue bikini. She spots you and waves enthusiastically, a radiant smile spreading across her face.*
+Tags: standing, beach, bikini, waving, smile, outdoors`,
+    jailbreakPrompt: "Tags:",
     assistantPrefill: ""
 };
 
