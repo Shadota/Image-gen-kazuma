@@ -133,7 +133,7 @@ async function loadSettings() {
     populateResolutions();
     populateWorkflows();
     await fetchComfyLists();
-    await populateTagPresets();
+    populateTagPresets();
 }
 
 function updateSliderInput(sliderId, numberId, value) {
@@ -426,46 +426,21 @@ async function onTestConnection() {
 }
 
 /* --- TAG API PRESET FUNCTIONS --- */
-async function loadTagPresets() {
-    try {
-        const response = await fetch('/api/presets/openai', {
-            method: 'GET',
-            headers: getRequestHeaders()
-        });
-        if (response.ok) {
-            const presets = await response.json();
-            return presets;
-        }
-    } catch (e) {
-        console.warn(`[${extensionName}] Failed to fetch OpenAI presets:`, e);
-    }
-    return [];
-}
-
-async function loadPresetConfig(presetName) {
-    try {
-        const response = await fetch(`/api/presets/openai/${encodeURIComponent(presetName)}`, {
-            method: 'GET',
-            headers: getRequestHeaders()
-        });
-        if (response.ok) {
-            return await response.json();
-        }
-    } catch (e) {
-        console.warn(`[${extensionName}] Failed to load preset ${presetName}:`, e);
-    }
-    return null;
-}
-
-async function populateTagPresets() {
-    const presets = await loadTagPresets();
+function populateTagPresets() {
     const $dropdown = $("#kazuma_tag_preset");
-    $dropdown.empty();
-    $dropdown.append('<option value="">-- Select Preset --</option>');
+    const $stPresets = $("#settings_preset_openai").find("option");
 
-    for (const preset of presets) {
-        const name = typeof preset === 'object' ? preset.name : preset;
-        $dropdown.append(`<option value="${name}">${name}</option>`);
+    $dropdown.empty();
+    $dropdown.append('<option value="">-- Use Current Settings --</option>');
+
+    if ($stPresets.length) {
+        $stPresets.each(function() {
+            const val = $(this).val();
+            const text = $(this).text();
+            if (val) { // Skip empty options
+                $dropdown.append(`<option value="${val}">${text}</option>`);
+            }
+        });
     }
 
     if (extension_settings[extensionName].tagPreset) {
@@ -481,21 +456,27 @@ async function generateTagsWithCustomApi(sceneText) {
         throw new Error("Tag API not configured. Please set endpoint, API key, and model.");
     }
 
-    // Load preset configuration
-    let preset = null;
+    // Switch to selected preset if specified (this loads preset settings into ST's state)
+    const originalPreset = $("#settings_preset_openai").val();
     if (s.tagPreset) {
-        preset = await loadPresetConfig(s.tagPreset);
+        $("#settings_preset_openai").val(s.tagPreset).trigger("change");
+        // Small delay to let ST load the preset
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
+
+    // Get character name for macro replacement
+    const charName = getContext().name2 || 'Character';
+
+    // Access ST's loaded preset settings via oai_settings global
+    const oaiSettings = window.oai_settings || {};
 
     // Build messages array
     const messages = [];
 
-    // Extract system prompts from preset and replace macros
-    const charName = getContext().name2 || 'Character';
-
-    if (preset && preset.prompts && Array.isArray(preset.prompts)) {
-        const systemPrompts = preset.prompts
-            .filter(p => p.enabled !== false && p.content)
+    // Extract prompts from ST's current state
+    if (oaiSettings.prompts && Array.isArray(oaiSettings.prompts)) {
+        const systemPrompts = oaiSettings.prompts
+            .filter(p => p.content && p.content.trim())
             .map(p => ({
                 role: p.role || 'system',
                 content: p.content.replace(/\{\{char\}\}/gi, charName)
@@ -506,21 +487,22 @@ async function generateTagsWithCustomApi(sceneText) {
     // Add user message with scene text
     messages.push({ role: 'user', content: sceneText });
 
-    // Handle assistant prefill if present in preset
-    if (preset && preset.assistant_prefill) {
-        const prefill = preset.assistant_prefill.replace(/\{\{char\}\}/gi, charName);
-        messages.push({ role: 'assistant', content: prefill });
+    // Handle assistant prefill
+    const prefill = oaiSettings.assistant_prefill || '';
+    if (prefill) {
+        const processedPrefill = prefill.replace(/\{\{char\}\}/gi, charName);
+        messages.push({ role: 'assistant', content: processedPrefill });
     }
 
-    // Build request body
+    // Build request body using ST's loaded settings
     const requestBody = {
         model: s.tagModel,
         messages: messages,
-        max_tokens: (preset && preset.openai_max_tokens) || 300,
-        temperature: (preset && preset.temperature) || 0.7,
-        top_p: (preset && preset.top_p) || 1,
-        frequency_penalty: (preset && preset.frequency_penalty) || 0,
-        presence_penalty: (preset && preset.presence_penalty) || 0
+        max_tokens: oaiSettings.openai_max_tokens || 300,
+        temperature: oaiSettings.temperature ?? 0.7,
+        top_p: oaiSettings.top_p ?? 1,
+        frequency_penalty: oaiSettings.frequency_penalty ?? 0,
+        presence_penalty: oaiSettings.presence_penalty ?? 0
     };
 
     // Make API request
@@ -533,6 +515,11 @@ async function generateTagsWithCustomApi(sceneText) {
         body: JSON.stringify(requestBody)
     });
 
+    // Restore original preset
+    if (s.tagPreset && originalPreset !== s.tagPreset) {
+        $("#settings_preset_openai").val(originalPreset).trigger("change");
+    }
+
     if (!response.ok) {
         const error = await response.text();
         throw new Error(`Tag API request failed (${response.status}): ${error}`);
@@ -541,10 +528,9 @@ async function generateTagsWithCustomApi(sceneText) {
     const data = await response.json();
     let result = data.choices[0].message.content;
 
-    // Prepend prefill to response if it was used (some APIs continue from prefill)
-    if (preset && preset.assistant_prefill && !result.startsWith(preset.assistant_prefill)) {
-        const prefill = preset.assistant_prefill.replace(/\{\{char\}\}/gi, charName);
-        result = prefill + result;
+    // Prepend prefill to response if it was used
+    if (prefill && !result.startsWith(prefill.replace(/\{\{char\}\}/gi, charName))) {
+        result = prefill.replace(/\{\{char\}\}/gi, charName) + result;
     }
 
     return result;
