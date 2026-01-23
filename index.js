@@ -845,6 +845,25 @@ Tags: standing, beach, bikini, waving, smile, outdoors`,
     assistantPrefill: ""
 };
 
+/* --- VISUAL DESCRIPTION CONFIG (Stage 1: Summarize before tagging) --- */
+const DESCRIPTION_GEN_CONFIG = {
+    temperature: 0.4,
+    top_p: 0.85,
+    frequency_penalty: 0,
+    presence_penalty: 1.5,
+    max_tokens: 2048,
+    systemPrompt: `You are a visual scene descriptor. Given roleplay text, extract ONLY the visual elements into a single short sentence. Keep it simple and concise - under 30 words.
+
+Focus on: pose, expression, clothing, setting, lighting.
+Exclude: dialogue, thoughts, plot, names (use "a woman", "a girl", etc.)
+
+Example Input:
+*Eva nods, her mind latching onto the technical challenge. The playful warmth in her expression recedes, replaced by laser-focused analytical mode. She paces a short circle in the sand, her icy-blue eyes sharp. The desert sun beats down.*
+
+Example Output:
+A woman with blue eyes pacing in a desert, focused expression, harsh sunlight.`
+};
+
 /* --- TAG POST-PROCESSING WITH BOORU VALIDATION --- */
 
 // Valid booru tags (extracted from danbooru dataset - category 0 tags with 500+ posts)
@@ -7585,6 +7604,53 @@ function cleanTags(rawTags, charName) {
     return tags.join(', ');
 }
 
+async function generateVisualDescription(sceneText) {
+    const s = extension_settings[extensionName];
+
+    const messages = [
+        { role: 'system', content: DESCRIPTION_GEN_CONFIG.systemPrompt },
+        { role: 'user', content: sceneText }
+    ];
+
+    const requestBody = {
+        model: s.tagModel,
+        messages: messages,
+        max_tokens: DESCRIPTION_GEN_CONFIG.max_tokens,
+        temperature: DESCRIPTION_GEN_CONFIG.temperature,
+        top_p: DESCRIPTION_GEN_CONFIG.top_p,
+        frequency_penalty: DESCRIPTION_GEN_CONFIG.frequency_penalty,
+        presence_penalty: DESCRIPTION_GEN_CONFIG.presence_penalty
+    };
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (s.tagApiKey) {
+        headers['Authorization'] = `Bearer ${s.tagApiKey}`;
+    }
+
+    const response = await fetch(s.tagApiEndpoint, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Description API failed (${response.status}): ${error}`);
+    }
+
+    const data = await response.json();
+    let result = data.choices[0].message.content;
+
+    // Strip thinking tags (for reasoning models)
+    if (result.includes('</think>')) {
+        result = result.split('</think>').pop().trim();
+    }
+    result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    result = result.replace(/<\/?think>/gi, '').trim();
+
+    return result;
+}
+
 async function generateTagsWithCustomApi(sceneText) {
     const s = extension_settings[extensionName];
 
@@ -7676,13 +7742,19 @@ async function onGeneratePrompt() {
     }
 
     // [START PROGRESS]
-    showKazumaProgress("Generating Tags...");
+    showKazumaProgress("Summarizing Scene...");
 
     try {
         toastr.info("Visualizing...", "Image Gen Kazuma");
         const lastMessage = context.chat[context.chat.length - 1].mes;
 
-        let generatedText = await generateTagsWithCustomApi(lastMessage);
+        // Stage 1: Summarize roleplay into visual description
+        const visualDescription = await generateVisualDescription(lastMessage);
+        console.log(`[${extensionName}] Visual description: ${visualDescription}`);
+
+        // Stage 2: Generate booru tags from the clean description
+        showKazumaProgress("Generating Tags...");
+        let generatedText = await generateTagsWithCustomApi(visualDescription);
 
         if (s.debugPrompt) {
             // Hide progress while user is confirming
