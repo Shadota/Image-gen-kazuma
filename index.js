@@ -830,17 +830,24 @@ const TAG_GEN_CONFIG = {
     presence_penalty: 1.5,
     max_tokens: 1000,
     systemPrompt: `Generate danbooru tags for the scene. Output ONLY comma-separated tags.
+Use ONLY standard single-concept danbooru tags. Never add adjective modifiers to tags.
+WRONG: subtle_smile, harsh_sunlight, gentle_expression, dark_room
+RIGHT: smile, sunlight, serious, dark
 
-Include: pose, expression, setting, clothing (if changed)
-Exclude: hair/eye color, body features, abstract concepts
+Include: pose, expression, setting, clothing, lighting, camera angle
+Exclude: hair/eye color, body features, abstract concepts, emotions as nouns
 
 Example 1:
-*She settles onto the edge of the bed, her cheeks flushing a soft pink as she averts her gaze. The warmth of embarrassment spreads through her as she fidgets with the hem of her shirt, unable to meet your eyes.*
-Tags: sitting, bed, bedroom, blush, looking_away, indoors
+A woman sitting on a bed, blushing, looking away, wearing a shirt, indoors at night.
+Tags: sitting, bed, bedroom, blush, looking_to_the_side, shirt, indoors, night, upper_body
 
 Example 2:
-*The ocean breeze catches her hair as she stands on the sandy shore, wearing a bright blue bikini. She spots you and waves enthusiastically, a radiant smile spreading across her face.*
-Tags: standing, beach, bikini, waving, smile, outdoors`,
+A woman standing on a beach in a blue bikini, waving, smiling, bright sunny day.
+Tags: standing, beach, bikini, waving, smile, outdoors, day, ocean, sky, sand, cowboy_shot
+
+Example 3:
+A woman pacing in a desert, focused expression, harsh sunlight, wearing a blazer and skirt.
+Tags: standing, desert, outdoors, serious, sunlight, blazer, skirt, day, sand`,
     jailbreakPrompt: "Tags: /nothink",
     assistantPrefill: ""
 };
@@ -7580,6 +7587,21 @@ const BAD_TAG_PATTERNS = [
     /hum$/i, /feeling$/i                                        // more abstract
 ];
 
+function resolveTag(tag) {
+    // Direct match
+    if (VALID_BOORU_TAGS.has(tag)) return tag;
+    // Try alias
+    const aliased = TAG_ALIASES[tag];
+    if (aliased && VALID_BOORU_TAGS.has(aliased)) return aliased;
+    // Try suffix matching: strip leading components
+    const parts = tag.split('_');
+    for (let i = 1; i < parts.length; i++) {
+        const suffix = parts.slice(i).join('_');
+        if (VALID_BOORU_TAGS.has(suffix)) return suffix;
+    }
+    return null;
+}
+
 function cleanTags(rawTags, charName) {
     let tags = rawTags
         .split(',')
@@ -7587,10 +7609,9 @@ function cleanTags(rawTags, charName) {
         .filter(t => t.length > 1)
         // Filter out bad patterns
         .filter(t => !BAD_TAG_PATTERNS.some(pattern => pattern.test(t)))
-        // Apply alias corrections
-        .map(t => TAG_ALIASES[t] || t)
-        // Only keep valid booru tags
-        .filter(t => VALID_BOORU_TAGS.has(t))
+        // Resolve tags with suffix-matching fallback
+        .map(t => resolveTag(t))
+        .filter(t => t !== null)
         // Dedupe
         .filter((t, i, arr) => arr.indexOf(t) === i)
         // Max 15 tags
