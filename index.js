@@ -152,7 +152,9 @@ function resetSceneState(category) {
 }
 
 function updatePersistenceUI() {
+    const key = getSceneStateKey();
     const state = getSceneState();
+    console.log(`[${extensionName}] updatePersistenceUI: key="${key}" state=`, state);
     $("#kazuma_persist_bg_tags").text(state.background.length > 0 ? state.background.join(', ') : '(none)');
     $("#kazuma_persist_cloth_tags").text(state.clothing.length > 0 ? state.clothing.join(', ') : '(none)');
 }
@@ -563,6 +565,8 @@ async function loadSettings() {
     // Scene Persistence Settings
     $("#kazuma_persist_enable").prop("checked", extension_settings[extensionName].persistenceEnabled);
     updatePersistenceUI();
+    // Retry after chat is likely loaded (chatId may not be available immediately)
+    setTimeout(() => updatePersistenceUI(), 2000);
 
     // Pop-out Settings
     $("#kazuma_use_popout").prop("checked", extension_settings[extensionName].usePopout);
@@ -10826,11 +10830,14 @@ async function generateTagsWithCustomApi(sceneText) {
     result = cleanTags(result, charName);
 
     // Apply scene persistence (inject saved tags if categories missing)
+    const beforePersist = result;
     result = applyPersistence(result);
+    console.log(`[${extensionName}] Persistence: before="${beforePersist}" after="${result}"`);
 
     // Update saved scene state with final tags
     const finalTags = result.split(',').map(t => t.trim().toLowerCase().replace(/\s+/g, '_')).filter(t => t.length > 0);
     updateSceneState(finalTags);
+    console.log(`[${extensionName}] Scene state saved:`, getSceneState());
     updatePersistenceUI();
 
     // Ensure character name is first
@@ -11270,6 +11277,9 @@ jQuery(async () => {
         loadSettings();
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
         eventSource.on(event_types.IMAGE_SWIPED, onImageSwiped);
+        if (event_types.CHAT_CHANGED) {
+            eventSource.on(event_types.CHAT_CHANGED, () => { updatePersistenceUI(); });
+        }
 
         let att = 0; const int = setInterval(() => { if ($("#kazuma_quick_gen").length > 0) { clearInterval(int); return; } createChatButton(); att++; if (att > 5) clearInterval(int); }, 1000);
         $(document).on("click", "#kazuma_quick_gen", function(e) { e.preventDefault(); e.stopPropagation(); onGeneratePrompt(); });
