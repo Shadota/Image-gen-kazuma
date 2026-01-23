@@ -88,6 +88,9 @@ const defaultSettings = {
     tagApiKey: "",
     tagModel: "",
     savedWorkflowStates: {},
+    // Scene Persistence Settings
+    persistenceEnabled: true,
+    savedSceneStates: {},
     // Pop-out Settings
     usePopout: true,
     autoOpenPopout: true,
@@ -100,6 +103,59 @@ let KAZUMA_POPOUT_VISIBLE = false;
 let KAZUMA_POPOUT_LOCKED = false;
 let $KAZUMA_POPOUT = null;
 let currentPopoutImageData = { url: '', prompt: '', base64: '' };
+
+// --- SCENE PERSISTENCE FUNCTIONS ---
+
+function getSceneStateKey() {
+    const context = getContext();
+    return context.chatId || 'default';
+}
+
+function getSceneState() {
+    const s = extension_settings[extensionName];
+    if (!s.savedSceneStates) s.savedSceneStates = {};
+    const key = getSceneStateKey();
+    return s.savedSceneStates[key] || { background: [], clothing: [] };
+}
+
+function updateSceneState(tagArray) {
+    const s = extension_settings[extensionName];
+    if (!s.persistenceEnabled) return;
+    if (!s.savedSceneStates) s.savedSceneStates = {};
+    const key = getSceneStateKey();
+
+    const bgTags = tagArray.filter(t => BACKGROUND_TAGS.has(t));
+    const clothTags = tagArray.filter(t => CLOTHING_TAGS.has(t));
+
+    const current = s.savedSceneStates[key] || { background: [], clothing: [] };
+
+    // Only update a category if the LLM produced tags for it
+    if (bgTags.length > 0) current.background = bgTags.slice(0, 4);
+    if (clothTags.length > 0) current.clothing = clothTags.slice(0, 3);
+
+    s.savedSceneStates[key] = current;
+    saveSettingsDebounced();
+}
+
+function resetSceneState(category) {
+    const s = extension_settings[extensionName];
+    if (!s.savedSceneStates) s.savedSceneStates = {};
+    const key = getSceneStateKey();
+    const current = s.savedSceneStates[key] || { background: [], clothing: [] };
+
+    if (category === 'background' || category === 'all') current.background = [];
+    if (category === 'clothing' || category === 'all') current.clothing = [];
+
+    s.savedSceneStates[key] = current;
+    saveSettingsDebounced();
+    updatePersistenceUI();
+}
+
+function updatePersistenceUI() {
+    const state = getSceneState();
+    $("#kazuma_persist_bg_tags").text(state.background.length > 0 ? state.background.join(', ') : '(none)');
+    $("#kazuma_persist_cloth_tags").text(state.clothing.length > 0 ? state.clothing.join(', ') : '(none)');
+}
 
 // --- POPOUT FUNCTIONS ---
 
@@ -504,6 +560,10 @@ async function loadSettings() {
     $("#kazuma_tag_api_key").val(extension_settings[extensionName].tagApiKey || "");
     $("#kazuma_tag_model").val(extension_settings[extensionName].tagModel || "");
 
+    // Scene Persistence Settings
+    $("#kazuma_persist_enable").prop("checked", extension_settings[extensionName].persistenceEnabled);
+    updatePersistenceUI();
+
     // Pop-out Settings
     $("#kazuma_use_popout").prop("checked", extension_settings[extensionName].usePopout);
     $("#kazuma_auto_open_popout").prop("checked", extension_settings[extensionName].autoOpenPopout);
@@ -837,6 +897,11 @@ RIGHT: smile, sunlight, serious, dark
 Include: pose, expression, setting, clothing, lighting, camera angle
 Exclude: hair/eye color, body features, abstract concepts, emotions as nouns
 
+PERSISTENCE RULES:
+- Only output background/setting tags (indoors, outdoors, bedroom, beach, night, etc.) if the scene EXPLICITLY describes a NEW or DIFFERENT location.
+- Only output clothing tags (shirt, dress, bikini, uniform, etc.) if the scene EXPLICITLY describes clothing being worn or changed.
+- If the scene just describes actions/expressions/dialogue without mentioning location or clothing, do NOT output any background or clothing tags.
+
 Example 1:
 A woman sitting on a bed, blushing, looking away, wearing a shirt, indoors at night.
 Tags: sitting, bed, bedroom, blush, looking_to_the_side, shirt, indoors, night, upper_body
@@ -847,7 +912,11 @@ Tags: standing, beach, bikini, waving, smile, outdoors, day, ocean, sky, sand, c
 
 Example 3:
 A woman pacing in a desert, focused expression, harsh sunlight, wearing a blazer and skirt.
-Tags: standing, desert, outdoors, serious, sunlight, blazer, skirt, day, sand`,
+Tags: standing, desert, outdoors, serious, sunlight, blazer, skirt, day, sand
+
+Example 4 (no scene/clothing change):
+A woman smiling and waving her hand cheerfully.
+Tags: smile, waving, standing, upper_body`,
     jailbreakPrompt: "Tags: /nothink",
     assistantPrefill: ""
 };
@@ -2168,6 +2237,43 @@ const VALID_BOORU_TAGS = new Set([
     'yuyushiki\'s_school_uniform', 'z-ring', 'z_saber', 'zabuton', 'zebra_print', 'zenra', 'zentradi', 'zeon',
     'zero_gravity', 'zero_suit', 'zettai_ryouiki', 'zipper', 'zipper_dress', 'zipper_pull_tab', 'zipper_skirt', 'zodiac',
     'zombie', 'zombie_pose', 'zoom_layer', 'zora', 'zouri', 'zun_(style)', 'zzz', '|_|'
+]);
+
+// Scene Persistence: Background/setting tags (curated subset of VALID_BOORU_TAGS)
+const BACKGROUND_TAGS = new Set([
+    'indoors', 'outdoors', 'bedroom', 'bathroom', 'kitchen', 'living_room', 'classroom',
+    'hallway', 'rooftop', 'balcony', 'office', 'library', 'hospital', 'church', 'temple',
+    'shrine', 'castle', 'dungeon', 'cave', 'ruins', 'alley', 'street', 'city', 'town',
+    'village', 'park', 'garden', 'forest', 'jungle', 'mountain', 'hill', 'cliff',
+    'beach', 'ocean', 'sea', 'lake', 'river', 'waterfall', 'pool', 'hot_spring',
+    'desert', 'snow', 'field', 'meadow', 'farm', 'bridge', 'train', 'bus', 'car_interior',
+    'space', 'underwater', 'sky', 'cloud', 'sunset', 'sunrise', 'night', 'day',
+    'evening', 'morning', 'twilight', 'rain', 'snowing', 'fog', 'storm',
+    'starry_sky', 'moonlight', 'sunlight', 'shade', 'dark', 'bright',
+    'bed', 'couch', 'chair', 'desk', 'table', 'window', 'door', 'stairs',
+    'cafe', 'restaurant', 'bar_(place)', 'shop', 'market', 'stadium', 'arena',
+    'stage', 'gym', 'dojo', 'laboratory', 'prison', 'throne_room', 'tent', 'campfire'
+]);
+
+// Scene Persistence: Clothing tags (curated subset of VALID_BOORU_TAGS)
+const CLOTHING_TAGS = new Set([
+    'shirt', 't-shirt', 'dress_shirt', 'blouse', 'tank_top', 'crop_top', 'tube_top',
+    'sweater', 'hoodie', 'cardigan', 'jacket', 'coat', 'blazer', 'vest',
+    'dress', 'sundress', 'gown', 'wedding_dress', 'evening_gown', 'chinese_dress',
+    'skirt', 'miniskirt', 'pleated_skirt', 'long_skirt',
+    'pants', 'jeans', 'shorts', 'short_shorts', 'bike_shorts',
+    'uniform', 'school_uniform', 'military_uniform', 'maid', 'nurse', 'police',
+    'sailor_collar', 'serafuku',
+    'bikini', 'swimsuit', 'one-piece_swimsuit', 'school_swimsuit',
+    'kimono', 'yukata', 'japanese_clothes', 'chinese_clothes',
+    'armor', 'cape', 'cloak', 'robe',
+    'pajamas', 'nightgown', 'lingerie', 'underwear', 'bra', 'panties',
+    'apron', 'overalls', 'bodysuit', 'jumpsuit', 'leotard',
+    'necktie', 'bow', 'ribbon', 'scarf', 'gloves', 'hat', 'cap',
+    'boots', 'shoes', 'sandals', 'high_heels', 'sneakers',
+    'thighhighs', 'pantyhose', 'kneehighs', 'socks', 'stockings',
+    'naked', 'nude', 'topless', 'bare_shoulders', 'bare_legs',
+    'towel', 'towel_wrap', 'sports_bra', 'gym_uniform'
 ]);
 
 // Alias corrections (extracted from danbooru - maps common variations to canonical booru tags)
@@ -7625,6 +7731,38 @@ function cleanTags(rawTags, charName) {
     return tags.join(', ');
 }
 
+function applyPersistence(tagString) {
+    const s = extension_settings[extensionName];
+    if (!s.persistenceEnabled) return tagString;
+
+    const state = getSceneState();
+    if (state.background.length === 0 && state.clothing.length === 0) return tagString;
+
+    let tags = tagString.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+    const hasBgTag = tags.some(t => BACKGROUND_TAGS.has(t));
+    const hasClothTag = tags.some(t => CLOTHING_TAGS.has(t));
+
+    let toInject = [];
+    if (!hasBgTag && state.background.length > 0) {
+        toInject.push(...state.background);
+    }
+    if (!hasClothTag && state.clothing.length > 0) {
+        toInject.push(...state.clothing);
+    }
+
+    if (toInject.length === 0) return tagString;
+
+    // Dynamic tags take priority; persistent fills remaining up to 15
+    const remaining = 15 - tags.length;
+    if (remaining > 0) {
+        const inject = toInject.filter(t => !tags.includes(t)).slice(0, remaining);
+        tags.push(...inject);
+    }
+
+    return tags.join(', ');
+}
+
 async function generateVisualDescription(sceneText) {
     const s = extension_settings[extensionName];
 
@@ -7683,11 +7821,23 @@ async function generateTagsWithCustomApi(sceneText) {
     // Get character name for macro replacement
     const charName = getContext().name2 || 'Character';
 
+    // Build system prompt with persistence context
+    let systemContent = TAG_GEN_CONFIG.systemPrompt.replace(/\{\{char\}\}/gi, charName);
+    if (s.persistenceEnabled) {
+        const state = getSceneState();
+        if (state.background.length > 0 || state.clothing.length > 0) {
+            let ctx = '\n\nPERSISTENT STATE (do NOT output these categories unless explicitly changed):';
+            if (state.background.length > 0) ctx += `\nPrevious background: ${state.background.join(', ')}`;
+            if (state.clothing.length > 0) ctx += `\nPrevious clothing: ${state.clothing.join(', ')}`;
+            systemContent += ctx;
+        }
+    }
+
     // Build messages array using hardcoded config
     const messages = [
         {
             role: 'system',
-            content: TAG_GEN_CONFIG.systemPrompt.replace(/\{\{char\}\}/gi, charName)
+            content: systemContent
         },
         {
             role: 'user',
@@ -7739,6 +7889,14 @@ async function generateTagsWithCustomApi(sceneText) {
 
     // Clean and filter tags
     result = cleanTags(result, charName);
+
+    // Apply scene persistence (inject saved tags if categories missing)
+    result = applyPersistence(result);
+
+    // Update saved scene state with final tags
+    const finalTags = result.split(',').map(t => t.trim().toLowerCase().replace(/\s+/g, '_')).filter(t => t.length > 0);
+    updateSceneState(finalTags);
+    updatePersistenceUI();
 
     // Ensure character name is first
     if (!result.toLowerCase().startsWith(charName.toLowerCase())) {
@@ -8079,6 +8237,12 @@ jQuery(async () => {
         $("#kazuma_tag_endpoint").on("input", (e) => { extension_settings[extensionName].tagApiEndpoint = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_api_key").on("input", (e) => { extension_settings[extensionName].tagApiKey = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_model").on("input", (e) => { extension_settings[extensionName].tagModel = $(e.target).val(); saveSettingsDebounced(); });
+
+        // Scene Persistence event handlers
+        $("#kazuma_persist_enable").on("change", (e) => { extension_settings[extensionName].persistenceEnabled = $(e.target).prop("checked"); saveSettingsDebounced(); });
+        $("#kazuma_persist_reset_bg").on("click", () => { resetSceneState('background'); toastr.info("Background state reset.", "Scene Persistence"); });
+        $("#kazuma_persist_reset_cloth").on("click", () => { resetSceneState('clothing'); toastr.info("Clothing state reset.", "Scene Persistence"); });
+        $("#kazuma_persist_reset_all").on("click", () => { resetSceneState('all'); toastr.info("All scene state reset.", "Scene Persistence"); });
 
         // Pop-out settings event handlers
         $("#kazuma_popout_toggle").on("click", (e) => { e.stopPropagation(); toggleKazumaPopout(); });
