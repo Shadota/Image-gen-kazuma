@@ -449,12 +449,10 @@ function updatePersistenceUI() {
     const key = getSceneStateKey();
     const state = getSceneState();
     console.log(`[${extensionName}] updatePersistenceUI: key="${key}" state=`, state);
-    const bgEffective = getEffectiveStateTags('background');
+
+    // Sprite mode: Only clothing override is used
     const clothEffective = getEffectiveStateTags('clothing');
-    const posEffective = getEffectiveStateTags('position');
-    $("#kazuma_persist_bg_tags").text(bgEffective.length > 0 ? bgEffective.join(', ') : '(none)');
     $("#kazuma_persist_cloth_tags").text(clothEffective.length > 0 ? clothEffective.join(', ') : '(none)');
-    $("#kazuma_persist_pos_tags").text(posEffective.length > 0 ? posEffective.join(', ') : '(none)');
 
     // Also update popout state UI if it exists
     if ($KAZUMA_POPOUT && $KAZUMA_POPOUT.hasClass('kazuma-popout-visible')) {
@@ -1273,63 +1271,78 @@ async function onTestConnection() {
     } catch (error) { toastr.error(`Connection failed: ${error.message}`, "Image Gen Kazuma"); }
 }
 
-/* --- TAG GENERATION CONFIG (Hardcoded) --- */
+/* --- SPRITE STATE EXTRACTION CONFIG (Hardcoded) --- */
+const SPRITE_STATE_PROMPT = `Extract the character's current state as JSON. Pick from these options:
+
+EMOTION: neutral, happy, smirk, blush, embarrassed, sad, angry, surprised, worried, tired, smug, pout
+INTENSITY: low, medium, high
+POSE: standing, sitting, leaning, lying, kneeling, arms_crossed, hand_on_hip, hands_together
+ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging
+
+Output ONLY valid JSON (no markdown, no explanation):
+{"emotion": "...", "intensity": "...", "pose": "...", "action": "..."}
+
+Example 1: *She blushes and looks away nervously*
+{"emotion": "blush", "intensity": "high", "pose": "standing", "action": null}
+
+Example 2: *She grins and waves enthusiastically*
+{"emotion": "happy", "intensity": "high", "pose": "standing", "action": "waving"}
+
+Example 3: *She sits down with a tired sigh, resting her chin on her hand*
+{"emotion": "tired", "intensity": "medium", "pose": "sitting", "action": "thinking"}
+
+Example 4: *Her eyes narrow in annoyance*
+{"emotion": "angry", "intensity": "low", "pose": "standing", "action": null}`;
+
 const TAG_GEN_CONFIG = {
-    temperature: 0.4,
-    top_p: 0.85,
+    temperature: 0.3,
+    top_p: 0.9,
     frequency_penalty: 0,
-    presence_penalty: 1.5,
-    max_tokens: 1000,
-    systemPrompt: `Generate danbooru tags for the scene. Output ONLY comma-separated tags.
-Use ONLY standard single-concept danbooru tags. Never add adjective modifiers to tags.
-WRONG: subtle_smile, harsh_sunlight, gentle_expression, dark_room
-RIGHT: smile, sunlight, serious, dark
-
-Include: pose, expression, setting, clothing, lighting, camera angle
-Exclude: hair/eye color, body features, abstract concepts, emotions as nouns
-
-PERSISTENCE RULES:
-- Only output background/setting tags (indoors, outdoors, bedroom, beach, night, etc.) if the scene EXPLICITLY describes a NEW or DIFFERENT location.
-- Only output clothing tags (shirt, dress, bikini, uniform, etc.) if the scene EXPLICITLY describes clothing being worn or changed.
-- If the scene just describes actions/expressions/dialogue without mentioning location or clothing, do NOT output any background or clothing tags.
-
-Example 1:
-A woman sitting on a bed, blushing, looking away, wearing a shirt, indoors at night.
-Tags: sitting, bed, bedroom, blush, looking_to_the_side, shirt, indoors, night, upper_body
-
-Example 2:
-A woman standing on a beach in a blue bikini, waving, smiling, bright sunny day.
-Tags: standing, beach, bikini, waving, smile, outdoors, day, ocean, sky, sand, cowboy_shot
-
-Example 3:
-A woman pacing in a desert, focused expression, harsh sunlight, wearing a blazer and skirt.
-Tags: standing, desert, outdoors, serious, sunlight, blazer, skirt, day, sand
-
-Example 4 (no scene/clothing change):
-A woman smiling and waving her hand cheerfully.
-Tags: smile, waving, standing, upper_body`,
-    jailbreakPrompt: "Tags: /nothink",
-    assistantPrefill: ""
+    presence_penalty: 0,
+    max_tokens: 200,
+    systemPrompt: SPRITE_STATE_PROMPT,
+    jailbreakPrompt: "",
+    assistantPrefill: '{"'
 };
 
-/* --- VISUAL DESCRIPTION CONFIG (Stage 1: Summarize before tagging) --- */
-const DESCRIPTION_GEN_CONFIG = {
-    temperature: 0.4,
-    top_p: 0.85,
-    frequency_penalty: 0,
-    presence_penalty: 1.5,
-    max_tokens: 2048,
-    systemPrompt: `You are a visual scene descriptor. Given roleplay text, extract ONLY the visual elements into a single short sentence. Keep it simple and concise - under 30 words.
-
-Focus on: pose, expression, clothing, setting, lighting.
-Exclude: dialogue, thoughts, plot, names (use "a woman", "a girl", etc.)
-
-Example Input:
-*Eva nods, her mind latching onto the technical challenge. The playful warmth in her expression recedes, replaced by laser-focused analytical mode. She paces a short circle in the sand, her icy-blue eyes sharp. The desert sun beats down.*
-
-Example Output:
-A woman with blue eyes pacing in a desert, focused expression, harsh sunlight.`
+/* --- SPRITE PRESET MAPPINGS --- */
+const EMOTION_PRESETS = {
+    neutral:     { low: "expressionless", medium: "closed_mouth", high: "serious" },
+    happy:       { low: "light_smile", medium: "smile", high: "grin" },
+    smirk:       { low: "smirk", medium: "smirk", high: "smug" },
+    blush:       { low: "light_blush", medium: "blush", high: "heavy_blush" },
+    embarrassed: { low: "nervous", medium: "embarrassed", high: "flustered" },
+    sad:         { low: "frown", medium: "sad", high: "crying" },
+    angry:       { low: "annoyed", medium: "angry", high: "rage" },
+    surprised:   { low: "curious", medium: "surprised", high: "shocked" },
+    worried:     { low: "worried", medium: "nervous", high: "scared" },
+    tired:       { low: "tired", medium: "sleepy", high: "exhausted" },
+    smug:        { low: "confident", medium: "smug", high: "arrogant" },
+    pout:        { low: "pout", medium: "pouting", high: "sulking" }
 };
+
+const POSE_PRESETS = {
+    standing:       "standing",
+    sitting:        "sitting",
+    leaning:        "leaning_forward",
+    lying:          "lying",
+    kneeling:       "kneeling",
+    arms_crossed:   "crossed_arms",
+    hand_on_hip:    "hand_on_hip",
+    hands_together: "hands_together"
+};
+
+const ACTION_PRESETS = {
+    waving:   "waving",
+    pointing: "pointing",
+    thinking: "hand_on_chin",
+    eating:   "eating",
+    drinking: "drinking",
+    reading:  "reading",
+    hugging:  "hugging"
+};
+
+const FIXED_FRAMING = "upper_body, simple_background, looking_at_viewer";
 
 /* --- TAG POST-PROCESSING WITH BOORU VALIDATION --- */
 
@@ -11152,54 +11165,50 @@ function applyPersistence(tagString) {
     return tags.join(', ');
 }
 
-async function generateVisualDescription(sceneText) {
+/* --- SPRITE PROMPT BUILDER --- */
+function buildSpritePrompt(stateJson) {
     const s = extension_settings[extensionName];
+    const parts = [];
 
-    const messages = [
-        { role: 'system', content: DESCRIPTION_GEN_CONFIG.systemPrompt },
-        { role: 'user', content: sceneText }
-    ];
+    // 1. LoRA trigger (hardcoded for now)
+    parts.push('ohwx');
 
-    const requestBody = {
-        model: s.tagModel,
-        messages: messages,
-        max_tokens: DESCRIPTION_GEN_CONFIG.max_tokens,
-        temperature: DESCRIPTION_GEN_CONFIG.temperature,
-        top_p: DESCRIPTION_GEN_CONFIG.top_p,
-        frequency_penalty: DESCRIPTION_GEN_CONFIG.frequency_penalty,
-        presence_penalty: DESCRIPTION_GEN_CONFIG.presence_penalty
-    };
+    // 2. Character count
+    parts.push('1girl');
 
-    const headers = { 'Content-Type': 'application/json' };
-    if (s.tagApiKey) {
-        headers['Authorization'] = `Bearer ${s.tagApiKey}`;
+    // 3. Emotion (with intensity)
+    const emotionPreset = EMOTION_PRESETS[stateJson.emotion];
+    if (emotionPreset) {
+        const emotionTag = emotionPreset[stateJson.intensity] || emotionPreset.medium;
+        parts.push(emotionTag);
     }
 
-    const response = await fetch(s.tagApiEndpoint, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Description API failed (${response.status}): ${error}`);
+    // 4. Pose
+    const poseTag = POSE_PRESETS[stateJson.pose];
+    if (poseTag) {
+        parts.push(poseTag);
     }
 
-    const data = await response.json();
-    let result = data.choices[0].message.content;
-
-    // Strip thinking tags (for reasoning models)
-    if (result.includes('</think>')) {
-        result = result.split('</think>').pop().trim();
+    // 5. Action (optional)
+    if (stateJson.action && stateJson.action !== 'null' && ACTION_PRESETS[stateJson.action]) {
+        parts.push(ACTION_PRESETS[stateJson.action]);
     }
-    result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    result = result.replace(/<\/?think>/gi, '').trim();
 
-    return result;
+    // 6. Clothing override (if set)
+    if (s.persistenceEnabled) {
+        const clothEffective = getEffectiveStateTags('clothing');
+        if (clothEffective.length > 0) {
+            parts.push(...clothEffective);
+        }
+    }
+
+    // 7. Fixed framing (always last)
+    parts.push(FIXED_FRAMING);
+
+    return parts.join(', ');
 }
 
-async function generateTagsWithCustomApi(sceneText) {
+async function generateSpriteState(sceneText) {
     const s = extension_settings[extensionName];
 
     // Validate configuration
@@ -11207,36 +11216,25 @@ async function generateTagsWithCustomApi(sceneText) {
         throw new Error("Tag API not configured. Please set endpoint and model.");
     }
 
-    // Get character name for macro replacement
-    const charName = getContext().name2 || 'Character';
-
-    // Build system prompt with persistence context
-    let systemContent = TAG_GEN_CONFIG.systemPrompt.replace(/\{\{char\}\}/gi, charName);
-    if (s.persistenceEnabled) {
-        const state = getSceneState();
-        if (state.background.length > 0 || state.clothing.length > 0) {
-            let ctx = '\n\nPERSISTENT STATE (do NOT output these categories unless explicitly changed):';
-            if (state.background.length > 0) ctx += `\nPrevious background: ${state.background.join(', ')}`;
-            if (state.clothing.length > 0) ctx += `\nPrevious clothing: ${state.clothing.join(', ')}`;
-            systemContent += ctx;
-        }
-    }
-
-    // Build messages array using hardcoded config
+    // Build messages array - simple and direct
     const messages = [
         {
             role: 'system',
-            content: systemContent
+            content: TAG_GEN_CONFIG.systemPrompt
         },
         {
             role: 'user',
             content: sceneText
-        },
-        {
-            role: 'system',
-            content: TAG_GEN_CONFIG.jailbreakPrompt.replace(/\{\{char\}\}/gi, charName)
         }
     ];
+
+    // Add assistant prefill if configured (helps models output JSON directly)
+    if (TAG_GEN_CONFIG.assistantPrefill) {
+        messages.push({
+            role: 'assistant',
+            content: TAG_GEN_CONFIG.assistantPrefill
+        });
+    }
 
     // Build request body using hardcoded settings
     const requestBody = {
@@ -11263,7 +11261,7 @@ async function generateTagsWithCustomApi(sceneText) {
 
     if (!response.ok) {
         const error = await response.text();
-        throw new Error(`Tag API request failed (${response.status}): ${error}`);
+        throw new Error(`State API request failed (${response.status}): ${error}`);
     }
 
     const data = await response.json();
@@ -11276,29 +11274,44 @@ async function generateTagsWithCustomApi(sceneText) {
     result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     result = result.replace(/<\/?think>/gi, '').trim();
 
-    // Clean and filter tags
-    result = cleanTags(result, charName);
-
-    // Apply scene persistence (inject saved tags if categories missing)
-    const beforePersist = result;
-    result = applyPersistence(result);
-    console.log(`[${extensionName}] Persistence: before="${beforePersist}" after="${result}"`);
-
-    // Update saved scene state with final tags
-    const finalTags = result.split(',').map(t => t.trim().toLowerCase().replace(/\s+/g, '_')).filter(t => t.length > 0);
-    updateSceneState(finalTags);
-    console.log(`[${extensionName}] Scene state saved:`, getSceneState());
-    updatePersistenceUI();
-
-    // Ensure trigger word is first
-    if (!result.toLowerCase().startsWith('ohwx')) {
-        result = 'ohwx, ' + result;
+    // Prepend the assistant prefill if we used it (model continues from there)
+    if (TAG_GEN_CONFIG.assistantPrefill) {
+        result = TAG_GEN_CONFIG.assistantPrefill + result;
     }
 
-    return result;
+    // Extract JSON from the response (handle markdown code blocks)
+    let jsonStr = result;
+    const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+        jsonStr = jsonMatch[1].trim();
+    } else {
+        // Try to find raw JSON object
+        const objMatch = result.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+            jsonStr = objMatch[0];
+        }
+    }
+
+    // Parse JSON
+    let stateJson;
+    try {
+        stateJson = JSON.parse(jsonStr);
+    } catch (e) {
+        console.error(`[${extensionName}] Failed to parse JSON: ${jsonStr}`);
+        // Fallback to neutral state
+        stateJson = { emotion: 'neutral', intensity: 'medium', pose: 'standing', action: null };
+    }
+
+    console.log(`[${extensionName}] Extracted state:`, stateJson);
+
+    // Build sprite prompt from presets
+    const prompt = buildSpritePrompt(stateJson);
+    console.log(`[${extensionName}] Generated prompt: ${prompt}`);
+
+    return prompt;
 }
 
-/* --- UPDATED GENERATION LOGIC --- */
+/* --- SPRITE MODE GENERATION LOGIC --- */
 async function onGeneratePrompt() {
     if (!extension_settings[extensionName].enabled) return;
     const context = getContext();
@@ -11313,18 +11326,13 @@ async function onGeneratePrompt() {
     }
 
     // [START PROGRESS]
-    showKazumaProgress("Summarizing Scene...");
+    showKazumaProgress("Extracting State...");
 
     try {
         const lastMessage = context.chat[context.chat.length - 1].mes;
 
-        // Stage 1: Summarize roleplay into visual description
-        const visualDescription = await generateVisualDescription(lastMessage);
-        console.log(`[${extensionName}] Visual description: ${visualDescription}`);
-
-        // Stage 2: Generate booru tags from the clean description
-        showKazumaProgress("Generating Tags...");
-        let generatedText = await generateTagsWithCustomApi(visualDescription);
+        // Single stage: Extract state and build sprite prompt
+        let generatedText = await generateSpriteState(lastMessage);
 
         if (s.debugPrompt) {
             // Hide progress while user is confirming
@@ -11626,11 +11634,9 @@ jQuery(async () => {
         $("#kazuma_tag_api_key").on("input", (e) => { extension_settings[extensionName].tagApiKey = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_model").on("input", (e) => { extension_settings[extensionName].tagModel = $(e.target).val(); saveSettingsDebounced(); });
 
-        // Scene Persistence event handlers
+        // Clothing Override event handlers (Sprite Mode)
         $("#kazuma_persist_enable").on("change", (e) => { extension_settings[extensionName].persistenceEnabled = $(e.target).prop("checked"); saveSettingsDebounced(); });
-        $("#kazuma_persist_reset_bg").on("click", () => { resetSceneState('background'); toastr.info("Background state reset.", "Scene Persistence"); });
-        $("#kazuma_persist_reset_cloth").on("click", () => { resetSceneState('clothing'); toastr.info("Clothing state reset.", "Scene Persistence"); });
-        $("#kazuma_persist_reset_all").on("click", () => { resetSceneState('all'); toastr.info("All scene state reset.", "Scene Persistence"); });
+        $("#kazuma_persist_reset_cloth").on("click", () => { resetSceneState('clothing'); toastr.info("Clothing override reset.", "Sprite Mode"); });
 
         // Pop-out settings event handlers
         $("#kazuma_popout_toggle").on("click", (e) => { e.stopPropagation(); toggleKazumaPopout(); });
