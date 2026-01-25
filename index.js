@@ -1244,7 +1244,7 @@ const EMOTION_PRESETS = {
 
 const POSE_PRESETS = {
     standing:       "standing",
-    sitting:        "sitting",
+    sitting:        "sitting, stool",
     leaning:        "leaning_forward",
     lying:          "lying",
     kneeling:       "kneeling",
