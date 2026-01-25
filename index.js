@@ -1166,9 +1166,30 @@ async function onTestConnection() {
 }
 
 /* --- SPRITE STATE EXTRACTION CONFIG (Hardcoded) --- */
-const SPRITE_STATE_PROMPT = `Extract the character's FINAL/ENDING state from the scene. Focus on how they END UP, not momentary reactions.
+const SPRITE_STATE_PROMPT = `Extract the character's FINAL/ENDING state. Focus on how they END UP, not momentary reactions.
 
-EMOTION: neutral, happy, smirk, blush, embarrassed, sad, angry, surprised, worried, tired, smug, pout, serious, gentle
+EMOTIONS (pick one):
+- happy: joy, excitement, cheerful
+- gentle: warm, caring, fond, soft smile, kindness
+- serious: focused, direct, stern, no-nonsense
+- smug: arrogant, self-satisfied, mocking superiority
+- smirk: playful teasing, flirty, mischievous
+- blush: flustered, shy romantic tension
+- embarrassed: awkward, caught off-guard
+- sad: upset, disappointed, grief
+- angry: frustrated, annoyed, furious
+- surprised: shocked, caught off-guard
+- worried: anxious, concerned, nervous
+- tired: exhausted, sleepy, drained
+- pout: sulking, childish displeasure
+- neutral: no particular emotion
+
+IMPORTANT DISTINCTIONS (DO NOT confuse these):
+- gentle (warm/caring/fond) ≠ smug (arrogant/superior) - "fond smile" = gentle, NOT smug
+- smirk (playful/teasing) ≠ smug (self-satisfied mockery)
+- happy (joyful) ≠ smug (pleased with oneself at others' expense)
+- serious (focused/direct) ≠ angry (frustrated/hostile)
+
 INTENSITY: low, medium, high
 POSE: standing, sitting, leaning, lying, kneeling, arms_crossed, hand_on_hip, hands_together
 ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging, gesturing
@@ -1176,20 +1197,24 @@ ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging, ge
 Output ONLY valid JSON:
 {"emotion": "...", "intensity": "...", "pose": "...", "action": "..."}
 
-Example 1: *She blushes and looks away nervously*
-{"emotion": "blush", "intensity": "high", "pose": "standing", "action": null}
+EXAMPLES:
+1. *She smiles warmly, a fond look in her eyes* "I'll help you."
+{"emotion": "gentle", "intensity": "medium", "pose": "standing", "action": null}
 
-Example 2: *She laughs, then leans forward with a serious expression* "This is important."
-{"emotion": "serious", "intensity": "medium", "pose": "leaning", "action": null}
+2. *He leans back with a satisfied smirk* "I told you so."
+{"emotion": "smug", "intensity": "medium", "pose": "leaning", "action": null}
 
-Example 3: *She sits down with a tired sigh, resting her chin on her hand*
-{"emotion": "tired", "intensity": "medium", "pose": "sitting", "action": "thinking"}
+3. *She laughs, then her expression turns serious* "But listen carefully."
+{"emotion": "serious", "intensity": "medium", "pose": "standing", "action": null}
 
-Example 4: *She smiles warmly and offers her hand*
-{"emotion": "gentle", "intensity": "medium", "pose": "standing", "action": null}`;
+4. *Her face flushes as she looks away* "I-it's not like that!"
+{"emotion": "embarrassed", "intensity": "high", "pose": "standing", "action": null}
+
+5. *She reaches out, concern evident* "Are you okay?"
+{"emotion": "worried", "intensity": "medium", "pose": "standing", "action": "gesturing"}`;
 
 const TAG_GEN_CONFIG = {
-    temperature: 0.3,
+    temperature: 0.1,
     top_p: 0.9,
     frequency_penalty: 0,
     presence_penalty: 0,
@@ -1238,6 +1263,38 @@ const ACTION_PRESETS = {
     hugging:    "hugging",
     gesturing:  "outstretched_arm"
 };
+
+// Validate and repair extracted state - fix invalid fields instead of falling back entirely to neutral
+function validateAndRepairState(stateJson) {
+    let repaired = false;
+
+    if (!stateJson.emotion || !EMOTION_PRESETS[stateJson.emotion]) {
+        console.warn(`[Image-gen-kazuma] Unknown emotion "${stateJson.emotion}", defaulting to neutral`);
+        stateJson.emotion = "neutral";
+        repaired = true;
+    }
+    if (!stateJson.intensity || !["low", "medium", "high"].includes(stateJson.intensity)) {
+        console.warn(`[Image-gen-kazuma] Invalid intensity "${stateJson.intensity}", defaulting to medium`);
+        stateJson.intensity = "medium";
+        repaired = true;
+    }
+    if (!stateJson.pose || !POSE_PRESETS[stateJson.pose]) {
+        console.warn(`[Image-gen-kazuma] Unknown pose "${stateJson.pose}", defaulting to standing`);
+        stateJson.pose = "standing";
+        repaired = true;
+    }
+    if (stateJson.action && stateJson.action !== "null" && !ACTION_PRESETS[stateJson.action]) {
+        console.warn(`[Image-gen-kazuma] Unknown action "${stateJson.action}", removing`);
+        stateJson.action = null;
+        repaired = true;
+    }
+
+    if (repaired) {
+        console.log(`[Image-gen-kazuma] Repaired state:`, stateJson);
+    }
+
+    return stateJson;
+}
 
 // Framing is now built dynamically in buildSpritePrompt() based on useFullBody setting
 
@@ -11200,6 +11257,9 @@ async function generateSpriteState(sceneText) {
         stateJson = { emotion: 'neutral', intensity: 'medium', pose: 'standing', action: null };
     }
 
+    // Validate and repair any invalid fields
+    stateJson = validateAndRepairState(stateJson);
+
     console.log(`[${extensionName}] Extracted state:`, stateJson);
 
     // Build sprite prompt from presets
@@ -11227,10 +11287,16 @@ async function onGeneratePrompt() {
     showKazumaProgress("Extracting State...");
 
     try {
-        const lastMessage = context.chat[context.chat.length - 1].mes;
+        // Get last 3 messages for emotional context (or fewer if chat is short)
+        const NUM_CONTEXT_MESSAGES = 3;
+        const recentMessages = context.chat.slice(-NUM_CONTEXT_MESSAGES)
+            .map(msg => `${msg.is_user ? 'User' : 'Character'}: ${msg.mes}`)
+            .join('\n\n');
+
+        const sceneText = `Analyze the conversation below. Focus on the CHARACTER's FINAL emotional state in the last message.\n\n${recentMessages}`;
 
         // Single stage: Extract state and build sprite prompt
-        let generatedText = await generateSpriteState(lastMessage);
+        let generatedText = await generateSpriteState(sceneText);
 
         if (s.debugPrompt) {
             // Hide progress while user is confirming
