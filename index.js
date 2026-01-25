@@ -91,6 +91,8 @@ const defaultSettings = {
     // Scene Persistence Settings
     persistenceEnabled: true,
     savedSceneStates: {},
+    // Sprite Mode Settings
+    useFullBody: false,
     // Pop-out Settings
     usePopout: true,
     autoOpenPopout: true,
@@ -839,8 +841,8 @@ async function loadSettings() {
     $("#kazuma_tag_api_key").val(extension_settings[extensionName].tagApiKey || "");
     $("#kazuma_tag_model").val(extension_settings[extensionName].tagModel || "");
 
-    // Scene Persistence Settings
-    $("#kazuma_persist_enable").prop("checked", extension_settings[extensionName].persistenceEnabled);
+    // Sprite Mode Settings
+    $("#kazuma_full_body").prop("checked", extension_settings[extensionName].useFullBody);
     updatePersistenceUI();
     // Retry after chat is likely loaded (chatId may not be available immediately)
     setTimeout(() => updatePersistenceUI(), 2000);
@@ -1234,7 +1236,7 @@ const ACTION_PRESETS = {
     hugging:  "hugging"
 };
 
-const FIXED_FRAMING = "upper_body, simple_background, looking_at_viewer";
+// Framing is now built dynamically in buildSpritePrompt() based on useFullBody setting
 
 /* --- TAG POST-PROCESSING WITH BOORU VALIDATION --- */
 
@@ -11094,8 +11096,9 @@ function buildSpritePrompt(stateJson) {
         parts.push(...clothTags);
     }
 
-    // 7. Fixed framing (always last)
-    parts.push(FIXED_FRAMING);
+    // 7. Framing (upper_body or full_body based on setting)
+    const framing = s.useFullBody ? 'full_body' : 'upper_body';
+    parts.push(`${framing}, simple_background, looking_at_viewer`);
 
     return parts.join(', ');
 }
@@ -11526,8 +11529,8 @@ jQuery(async () => {
         $("#kazuma_tag_api_key").on("input", (e) => { extension_settings[extensionName].tagApiKey = $(e.target).val(); saveSettingsDebounced(); });
         $("#kazuma_tag_model").on("input", (e) => { extension_settings[extensionName].tagModel = $(e.target).val(); saveSettingsDebounced(); });
 
-        // Clothing Override event handlers (Sprite Mode)
-        $("#kazuma_persist_enable").on("change", (e) => { extension_settings[extensionName].persistenceEnabled = $(e.target).prop("checked"); saveSettingsDebounced(); });
+        // Sprite Mode event handlers
+        $("#kazuma_full_body").on("change", (e) => { extension_settings[extensionName].useFullBody = $(e.target).prop("checked"); saveSettingsDebounced(); });
         $("#kazuma_persist_reset_cloth").on("click", () => { resetSceneState('clothing'); toastr.info("Clothing override reset.", "Sprite Mode"); });
 
         // Pop-out settings event handlers
