@@ -119,18 +119,31 @@ function getSceneState() {
     // Default new format
     const defaultState = {
         background: { tags: [], locked: false, manualOverride: '' },
-        clothing: { tags: [], locked: false, manualOverride: '' }
+        clothing: { tags: [], locked: false, manualOverride: '' },
+        position: { tags: [], locked: false, manualOverride: '' }
     };
 
     let state = s.savedSceneStates[key];
     if (!state) return defaultState;
 
     // Migration: convert old format { background: [], clothing: [] } to new format
+    let needsSave = false;
     if (Array.isArray(state.background) || Array.isArray(state.clothing)) {
         state = {
             background: { tags: Array.isArray(state.background) ? state.background : [], locked: false, manualOverride: '' },
-            clothing: { tags: Array.isArray(state.clothing) ? state.clothing : [], locked: false, manualOverride: '' }
+            clothing: { tags: Array.isArray(state.clothing) ? state.clothing : [], locked: false, manualOverride: '' },
+            position: { tags: [], locked: false, manualOverride: '' }
         };
+        needsSave = true;
+    }
+
+    // Migration: add position field if missing
+    if (!state.position) {
+        state.position = { tags: [], locked: false, manualOverride: '' };
+        needsSave = true;
+    }
+
+    if (needsSave) {
         s.savedSceneStates[key] = state;
         saveSettingsDebounced();
     }
@@ -196,6 +209,14 @@ function updatePopoutStateUI() {
     $("#kazuma_state_clothing_tags").text(clothEffective.length > 0 ? clothEffective.join(', ') : '(none)');
     $("#kazuma_lock_clothing").toggleClass('locked', clothState.locked)
         .find('i').attr('class', clothState.locked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open');
+
+    // Position section
+    const posState = state.position || { tags: [], locked: false, manualOverride: '' };
+    const posEffective = getEffectiveStateTags('position');
+    $("#kazuma_state_position_input").val(posState.manualOverride || '');
+    $("#kazuma_state_position_tags").text(posEffective.length > 0 ? posEffective.join(', ') : '(none)');
+    $("#kazuma_lock_position").toggleClass('locked', posState.locked)
+        .find('i').attr('class', posState.locked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open');
 }
 
 async function scanMessagesForState(count) {
@@ -219,13 +240,15 @@ async function scanMessagesForState(count) {
     }).join('\n\n');
 
     const systemPrompt = `You are analyzing a roleplay conversation to detect the current scene state.
-Extract the current LOCATION/BACKGROUND and CLOTHING being worn by the main character.
+Extract the current LOCATION/BACKGROUND, CLOTHING being worn, and POSITION/POSE of the main character.
 Output ONLY in this exact format (use booru-style tags, comma-separated):
 LOCATION: tag1, tag2, tag3
 CLOTHING: tag1, tag2, tag3
+POSITION: tag1, tag2, tag3
 
 If a category is unclear or not mentioned, output "(unknown)" for that line.
-Focus on the most recent state - what is true RIGHT NOW in the story.`;
+Focus on the most recent state - what is true RIGHT NOW in the story.
+For POSITION, use tags like: sitting, standing, lying, kneeling, on_bed, on_chair, arms_crossed, etc.`;
 
     const requestBody = {
         model: s.tagModel,
@@ -268,12 +291,16 @@ Focus on the most recent state - what is true RIGHT NOW in the story.`;
         // Parse the response
         const locationMatch = result.match(/LOCATION:\s*(.+)/i);
         const clothingMatch = result.match(/CLOTHING:\s*(.+)/i);
+        const positionMatch = result.match(/POSITION:\s*(.+)/i);
 
         if (locationMatch && locationMatch[1] && !locationMatch[1].includes('(unknown)')) {
             setManualOverride('background', locationMatch[1].trim());
         }
         if (clothingMatch && clothingMatch[1] && !clothingMatch[1].includes('(unknown)')) {
             setManualOverride('clothing', clothingMatch[1].trim());
+        }
+        if (positionMatch && positionMatch[1] && !positionMatch[1].includes('(unknown)')) {
+            setManualOverride('position', positionMatch[1].trim());
         }
 
         updatePopoutStateUI();
@@ -335,6 +362,7 @@ function updateSceneState(tagArray) {
 
     const bgTags = tagArray.filter(t => BACKGROUND_TAGS.has(t));
     const clothTags = tagArray.filter(t => CLOTHING_TAGS.has(t));
+    const posTags = tagArray.filter(t => POSITION_TAGS.has(t));
 
     const current = getSceneState();
 
@@ -346,6 +374,11 @@ function updateSceneState(tagArray) {
     // Only update clothing if LLM produced tags, not locked, and no manual override
     if (clothTags.length > 0 && !current.clothing.locked && !current.clothing.manualOverride) {
         current.clothing.tags = clothTags.slice(0, 3);
+    }
+
+    // Only update position if LLM produced tags, not locked, and no manual override
+    if (posTags.length > 0 && !current.position.locked && !current.position.manualOverride) {
+        current.position.tags = posTags.slice(0, 3);
     }
 
     s.savedSceneStates[key] = current;
@@ -364,6 +397,9 @@ function resetSceneState(category) {
     if (category === 'clothing' || category === 'all') {
         current.clothing = { tags: [], locked: false, manualOverride: '' };
     }
+    if (category === 'position' || category === 'all') {
+        current.position = { tags: [], locked: false, manualOverride: '' };
+    }
 
     s.savedSceneStates[key] = current;
     saveSettingsDebounced();
@@ -376,8 +412,10 @@ function updatePersistenceUI() {
     console.log(`[${extensionName}] updatePersistenceUI: key="${key}" state=`, state);
     const bgEffective = getEffectiveStateTags('background');
     const clothEffective = getEffectiveStateTags('clothing');
+    const posEffective = getEffectiveStateTags('position');
     $("#kazuma_persist_bg_tags").text(bgEffective.length > 0 ? bgEffective.join(', ') : '(none)');
     $("#kazuma_persist_cloth_tags").text(clothEffective.length > 0 ? clothEffective.join(', ') : '(none)');
+    $("#kazuma_persist_pos_tags").text(posEffective.length > 0 ? posEffective.join(', ') : '(none)');
 
     // Also update popout state UI if it exists
     if ($KAZUMA_POPOUT && $KAZUMA_POPOUT.hasClass('kazuma-popout-visible')) {
@@ -434,6 +472,16 @@ function injectPopoutHTML() {
                         <input type="text" id="kazuma_state_clothing_input" class="kazuma-state-input" placeholder="e.g. school_uniform, thighhighs">
                         <div class="kazuma-state-tags">Current: <span id="kazuma_state_clothing_tags">(none)</span></div>
                     </div>
+                    <div class="kazuma-state-section">
+                        <div class="kazuma-state-header">
+                            <span>Position</span>
+                            <button id="kazuma_lock_position" class="kazuma-lock-btn" title="Lock position state">
+                                <i class="fa-solid fa-lock-open"></i>
+                            </button>
+                        </div>
+                        <input type="text" id="kazuma_state_position_input" class="kazuma-state-input" placeholder="e.g. sitting, on_chair, arms_crossed">
+                        <div class="kazuma-state-tags">Current: <span id="kazuma_state_position_tags">(none)</span></div>
+                    </div>
                 </div>
                 <div id="kazuma_popout_prompt"></div>
                 <div id="kazuma_popout_actions">
@@ -489,6 +537,13 @@ function bindPopoutEvents() {
         toastr.info(locked ? "Clothing locked" : "Clothing unlocked", "Image Gen Kazuma");
     });
 
+    $("#kazuma_lock_position").on("click", function() {
+        const locked = toggleStateLock('position');
+        $(this).toggleClass('locked', locked)
+            .find('i').attr('class', locked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open');
+        toastr.info(locked ? "Position locked" : "Position unlocked", "Image Gen Kazuma");
+    });
+
     // State input fields with debounce
     let locationDebounce = null;
     $("#kazuma_state_location_input").on("input", function() {
@@ -506,6 +561,16 @@ function bindPopoutEvents() {
         const value = $(this).val();
         clothingDebounce = setTimeout(() => {
             setManualOverride('clothing', value);
+            updatePopoutStateUI();
+        }, 500);
+    });
+
+    let positionDebounce = null;
+    $("#kazuma_state_position_input").on("input", function() {
+        clearTimeout(positionDebounce);
+        const value = $(this).val();
+        positionDebounce = setTimeout(() => {
+            setManualOverride('position', value);
             updatePopoutStateUI();
         }, 500);
     });
@@ -3753,6 +3818,40 @@ const CLOTHING_TAGS = new Set([
     'spaghetti_strap', 'drawstring', 'embroidery', 'sequins', 'tassel', 'hood_down',
     'hood_up', 'zipper_pull_tab',
     'fingerless_gloves', 'revealing_clothes'
+]);
+
+// Scene Persistence: Position/pose tags (curated subset of VALID_BOORU_TAGS)
+const POSITION_TAGS = new Set([
+    'sitting', 'standing', 'lying', 'kneeling', 'crouching', 'squatting',
+    'leaning', 'leaning_forward', 'leaning_back', 'leaning_to_the_side',
+    'on_bed', 'on_chair', 'on_couch', 'on_floor', 'on_ground', 'on_table',
+    'on_desk', 'on_stomach', 'on_back', 'on_side', 'on_knees',
+    'sitting_on_bed', 'sitting_on_chair', 'sitting_on_couch', 'sitting_on_floor',
+    'sitting_on_table', 'sitting_on_desk', 'sitting_on_lap', 'sitting_on_person',
+    'seiza', 'wariza', 'indian_style', 'crossed_legs', 'legs_together', 'legs_apart',
+    'spread_legs', 'legs_up', 'leg_up', 'leg_lift', 'knees_together', 'knees_apart',
+    'fetal_position', 'curled_up', 'hugging_knees', 'hugging_own_legs',
+    'all_fours', 'hands_and_knees', 'crawling', 'prone', 'supine',
+    'bent_over', 'bending', 'hunched_over', 'slouching', 'arched_back',
+    'reclining', 'lounging', 'relaxed', 'stretched', 'stretching',
+    'standing_on_one_leg', 'tiptoes', 'walking', 'running', 'jumping',
+    'floating', 'falling', 'flying', 'hovering', 'suspended',
+    'against_wall', 'against_glass', 'against_tree', 'against_fence',
+    'arms_up', 'arms_behind_back', 'arms_behind_head', 'arms_at_sides',
+    'arms_crossed', 'hand_on_hip', 'hands_on_hips', 'hand_on_own_chest',
+    'hand_between_legs', 'hands_between_legs', 'hand_on_own_face',
+    'head_tilt', 'head_down', 'head_back', 'looking_up', 'looking_down',
+    'looking_away', 'looking_to_the_side', 'looking_back', 'looking_at_viewer',
+    'upside-down', 'sideways', 'twisted_torso', 'contrapposto',
+    'straddling', 'mounting', 'riding', 'piggyback', 'carrying', 'being_carried',
+    'lap_pillow', 'head_on_pillow', 'hugging_pillow', 'under_covers', 'in_water',
+    'bathing', 'showering', 'sleeping', 'waking_up', 'yawning',
+    'eating', 'drinking', 'reading', 'writing', 'typing', 'using_phone',
+    'gaming', 'cooking', 'cleaning', 'working', 'studying',
+    'exercising', 'dancing', 'singing', 'playing_instrument', 'posing',
+    'fighting_stance', 'defensive_stance', 'action_pose', 'dynamic_pose',
+    'victory_pose', 'peace_sign', 'thumbs_up', 'waving', 'salute',
+    'curtsy', 'bow', 'bowing', 'praying', 'meditating'
 ]);
 
 // Alias corrections (extracted from danbooru - maps common variations to canonical booru tags)
@@ -10960,17 +11059,20 @@ function applyPersistence(tagString) {
     const state = getSceneState();
     const bgEffective = getEffectiveStateTags('background');
     const clothEffective = getEffectiveStateTags('clothing');
+    const posEffective = getEffectiveStateTags('position');
 
-    if (bgEffective.length === 0 && clothEffective.length === 0) return tagString;
+    if (bgEffective.length === 0 && clothEffective.length === 0 && posEffective.length === 0) return tagString;
 
     let tags = tagString.split(',').map(t => t.trim()).filter(t => t.length > 0);
 
     const hasBgTag = tags.some(t => BACKGROUND_TAGS.has(t));
     const hasClothTag = tags.some(t => CLOTHING_TAGS.has(t));
+    const hasPosTag = tags.some(t => POSITION_TAGS.has(t));
 
     // Check if categories are locked or have manual override
     const bgLocked = state.background.locked || (state.background.manualOverride && state.background.manualOverride.trim());
     const clothLocked = state.clothing.locked || (state.clothing.manualOverride && state.clothing.manualOverride.trim());
+    const posLocked = state.position.locked || (state.position.manualOverride && state.position.manualOverride.trim());
 
     let toInject = [];
 
@@ -10989,6 +11091,14 @@ function applyPersistence(tagString) {
     } else if (!hasClothTag && clothEffective.length > 0) {
         // Not locked and no LLM cloth tags: inject saved
         toInject.push(...clothEffective);
+    }
+
+    if (posLocked && posEffective.length > 0) {
+        tags = tags.filter(t => !POSITION_TAGS.has(t));
+        toInject.push(...posEffective);
+    } else if (!hasPosTag && posEffective.length > 0) {
+        // Not locked and no LLM position tags: inject saved
+        toInject.push(...posEffective);
     }
 
     if (toInject.length === 0) return tags.join(', ');
