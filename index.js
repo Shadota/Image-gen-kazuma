@@ -534,7 +534,6 @@ function onPopoutDownload() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toastr.success("Download started");
     } catch (err) {
         console.error(err);
         toastr.error("Download failed");
@@ -10866,7 +10865,6 @@ async function onGeneratePrompt() {
     showKazumaProgress("Summarizing Scene...");
 
     try {
-        toastr.info("Visualizing...", "Image Gen Kazuma");
         const lastMessage = context.chat[context.chat.length - 1].mes;
 
         // Stage 1: Summarize roleplay into visual description
@@ -10935,7 +10933,6 @@ async function generateWithComfy(positivePrompt, target = null) {
     workflow = injectParamsIntoWorkflow(workflow, positivePrompt, finalSeed);
 
     try {
-        toastr.info("Sending to ComfyUI...", "Image Gen Kazuma");
         const res = await fetch(`${url}/prompt`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: workflow }) });
         if(!res.ok) throw new Error("Failed");
         const data = await res.json();
@@ -11074,7 +11071,6 @@ function compressImage(base64Str, quality = 0.9) {
 // --- SAVE TO SERVER ---
 async function insertImageToChat(imgUrl, promptText, target = null) {
     try {
-        toastr.info("Downloading image...", "Image Gen Kazuma");
         const response = await fetch(imgUrl);
         const blob = await response.blob();
         let base64FullURL = await blobToBase64(blob);
@@ -11098,7 +11094,6 @@ async function insertImageToChat(imgUrl, promptText, target = null) {
 
             // If not also saving to chat, we're done
             if (!s.alsoSaveToChat) {
-                toastr.success("Image ready in pop-out!");
                 return;
             }
             // Otherwise continue to save to chat as well
