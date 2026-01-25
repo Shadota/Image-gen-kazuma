@@ -1166,27 +1166,27 @@ async function onTestConnection() {
 }
 
 /* --- SPRITE STATE EXTRACTION CONFIG (Hardcoded) --- */
-const SPRITE_STATE_PROMPT = `Extract the character's current state as JSON. Pick from these options:
+const SPRITE_STATE_PROMPT = `Extract the character's FINAL/ENDING state from the scene. Focus on how they END UP, not momentary reactions.
 
-EMOTION: neutral, happy, smirk, blush, embarrassed, sad, angry, surprised, worried, tired, smug, pout
+EMOTION: neutral, happy, smirk, blush, embarrassed, sad, angry, surprised, worried, tired, smug, pout, serious, gentle
 INTENSITY: low, medium, high
 POSE: standing, sitting, leaning, lying, kneeling, arms_crossed, hand_on_hip, hands_together
 ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging, gesturing
 
-Output ONLY valid JSON (no markdown, no explanation):
+Output ONLY valid JSON:
 {"emotion": "...", "intensity": "...", "pose": "...", "action": "..."}
 
 Example 1: *She blushes and looks away nervously*
 {"emotion": "blush", "intensity": "high", "pose": "standing", "action": null}
 
-Example 2: *She grins and waves enthusiastically*
-{"emotion": "happy", "intensity": "high", "pose": "standing", "action": "waving"}
+Example 2: *She laughs, then leans forward with a serious expression* "This is important."
+{"emotion": "serious", "intensity": "medium", "pose": "leaning", "action": null}
 
 Example 3: *She sits down with a tired sigh, resting her chin on her hand*
 {"emotion": "tired", "intensity": "medium", "pose": "sitting", "action": "thinking"}
 
-Example 4: *Her eyes narrow in annoyance*
-{"emotion": "angry", "intensity": "low", "pose": "standing", "action": null}`;
+Example 4: *She smiles warmly and offers her hand*
+{"emotion": "gentle", "intensity": "medium", "pose": "standing", "action": null}`;
 
 const TAG_GEN_CONFIG = {
     temperature: 0.3,
@@ -1208,11 +1208,13 @@ const EMOTION_PRESETS = {
     embarrassed: { low: "nervous", medium: "embarrassed", high: "flustered" },
     sad:         { low: "frown", medium: "sad", high: "crying" },
     angry:       { low: "annoyed", medium: "angry", high: "rage" },
-    surprised:   { low: "curious", medium: "surprised", high: "shocked" },
+    surprised:   { low: "curious", medium: "surprised", high: "wide_eyes" },
     worried:     { low: "worried", medium: "nervous", high: "scared" },
     tired:       { low: "tired", medium: "sleepy", high: "exhausted" },
     smug:        { low: "confident", medium: "smug", high: "arrogant" },
-    pout:        { low: "pout", medium: "pouting", high: "sulking" }
+    pout:        { low: "pout", medium: "pouting", high: "sulking" },
+    serious:     { low: "closed_mouth", medium: "serious", high: "frown" },
+    gentle:      { low: "soft_smile", medium: "gentle_smile", high: "warm_smile" }
 };
 
 const POSE_PRESETS = {
