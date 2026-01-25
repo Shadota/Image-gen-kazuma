@@ -416,7 +416,7 @@ function injectPopoutHTML() {
     const popoutHTML = `
         <div id="kazuma_popout" class="draggable">
             <div class="panelControlBar" id="kazumaPopoutHeader">
-                <div class="title"><i class="fa-solid fa-paintbrush"></i> Kazuma Image</div>
+                <div class="title"></div>
                 <div class="header-controls">
                     <div class="fa-solid fa-arrows-left-right dragReset" title="Reset Size"></div>
                     <div class="fa-solid fa-lock-open dragLock" title="Lock Position"></div>
