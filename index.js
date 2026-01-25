@@ -1171,7 +1171,7 @@ const SPRITE_STATE_PROMPT = `Extract the character's current state as JSON. Pick
 EMOTION: neutral, happy, smirk, blush, embarrassed, sad, angry, surprised, worried, tired, smug, pout
 INTENSITY: low, medium, high
 POSE: standing, sitting, leaning, lying, kneeling, arms_crossed, hand_on_hip, hands_together
-ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging
+ACTION: null, waving, pointing, thinking, eating, drinking, reading, hugging, gesturing
 
 Output ONLY valid JSON (no markdown, no explanation):
 {"emotion": "...", "intensity": "...", "pose": "...", "action": "..."}
@@ -1227,13 +1227,14 @@ const POSE_PRESETS = {
 };
 
 const ACTION_PRESETS = {
-    waving:   "waving",
-    pointing: "pointing",
-    thinking: "hand_on_chin",
-    eating:   "eating",
-    drinking: "drinking",
-    reading:  "reading",
-    hugging:  "hugging"
+    waving:     "waving",
+    pointing:   "pointing",
+    thinking:   "hand_on_chin",
+    eating:     "eating",
+    drinking:   "drinking",
+    reading:    "reading",
+    hugging:    "hugging",
+    gesturing:  "outstretched_arm"
 };
 
 // Framing is now built dynamically in buildSpritePrompt() based on useFullBody setting
@@ -11169,8 +11170,8 @@ async function generateSpriteState(sceneText) {
     result = result.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     result = result.replace(/<\/?think>/gi, '').trim();
 
-    // Prepend the assistant prefill if we used it (model continues from there)
-    if (TAG_GEN_CONFIG.assistantPrefill) {
+    // Prepend the assistant prefill only if model continued from it (doesn't start with {)
+    if (TAG_GEN_CONFIG.assistantPrefill && !result.trim().startsWith('{')) {
         result = TAG_GEN_CONFIG.assistantPrefill + result;
     }
 
@@ -11181,7 +11182,7 @@ async function generateSpriteState(sceneText) {
         jsonStr = jsonMatch[1].trim();
     } else {
         // Try to find raw JSON object
-        const objMatch = result.match(/\{[\s\S]*\}/);
+        const objMatch = result.match(/\{[\s\S]*?\}/);
         if (objMatch) {
             jsonStr = objMatch[0];
         }
