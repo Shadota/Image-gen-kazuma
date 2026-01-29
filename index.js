@@ -99,6 +99,7 @@ const HARDCODED_WORKFLOW = {
 // === MINIMAL USER-CONFIGURABLE SETTINGS ===
 const defaultSettings = {
     enabled: true,
+    autoGenEnabled: false,
     comfyUrl: "http://127.0.0.1:8188",
     selectedModel: "",
     selectedLora: "",
@@ -591,7 +592,6 @@ async function saveAsBackground(base64FullURL) {
 
         // Set as active background
         $('#bg1').css('background-image', `url("backgrounds/${encodeURIComponent(bgName)}")`);
-        toastr.success(`Background set: ${bgName}`, "VN Background Gen");
     } catch (err) {
         console.error(`[${extensionName}] saveAsBackground failed:`, err);
         toastr.error(`Failed to set background: ${err.message}`);
@@ -650,7 +650,7 @@ async function onTestConnection() {
             body: JSON.stringify({ url: url })
         });
         if (result.ok) {
-            toastr.success("ComfyUI API connected!", "VN Background Gen");
+            console.log(`[${extensionName}] ComfyUI API connected`);
             await fetchComfyLists();
         } else {
             throw new Error('ComfyUI returned an error via proxy.');
@@ -718,6 +718,7 @@ const GENERATION_COOLDOWN = 5000; // 5 second cooldown between generations
 function onMessageReceived(id) {
     const s = extension_settings[extensionName];
     if (!s?.enabled) return;
+    if (!s?.autoGenEnabled) return; // Skip if auto-generation is disabled
 
     const chat = getContext().chat;
     if (!chat || !chat.length) return;
@@ -760,6 +761,7 @@ async function loadSettings() {
     const s = extension_settings[extensionName];
 
     $("#kazuma_enable").prop("checked", s.enabled);
+    $("#kazuma_auto_gen").prop("checked", s.autoGenEnabled);
     $("#kazuma_url").val(s.comfyUrl);
     $("#kazuma_tag_endpoint").val(s.tagApiEndpoint || "");
     $("#kazuma_tag_api_key").val(s.tagApiKey || "");
@@ -799,9 +801,31 @@ jQuery(async () => {
         // Load HTML template
         await $.get(`${extensionFolderPath}/example.html`).then(h => $("#extensions_settings2").append(h));
 
+        // Add regenerate background button to chat input area
+        const regenBtn = $(`
+            <div id="kazuma_regen_btn" class="fa-solid fa-image interactable"
+                 title="Generate VN Background"
+                 style="cursor: pointer; opacity: 0.7; font-size: 1.2em;"></div>
+        `);
+        regenBtn.on("click", () => {
+            if (!extension_settings[extensionName].enabled) {
+                toastr.warning("VN Background Gen is disabled");
+                return;
+            }
+            console.log(`[${extensionName}] Manual background generation triggered`);
+            onGeneratePrompt();
+        });
+        // Insert next to the send button
+        $("#send_but_sheld").append(regenBtn);
+
         // Bind event handlers
         $("#kazuma_enable").on("change", (e) => {
             extension_settings[extensionName].enabled = $(e.target).prop("checked");
+            saveSettingsDebounced();
+        });
+
+        $("#kazuma_auto_gen").on("change", (e) => {
+            extension_settings[extensionName].autoGenEnabled = $(e.target).prop("checked");
             saveSettingsDebounced();
         });
 
