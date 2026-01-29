@@ -26,68 +26,39 @@ const ILLUSTRIOUS_QUALITY_TAGS = "masterpiece, absurdres, newest, best quality";
 
 // === HARDCODED COMFYUI WORKFLOW (API format) ===
 // Node structure: CheckpointLoader → CLIPSetLastLayer → [LoRA Chain] → CLIPTextEncode → KSampler → VAEDecode → SaveImage
+// Workflow structure matching Dev-3 node IDs
 const HARDCODED_WORKFLOW = {
-    "3": {
+    "4": {
         "class_type": "CheckpointLoaderSimple",
         "inputs": {
             "ckpt_name": "{{MODEL}}"
         }
     },
-    "5": {
+    "35": {
         "class_type": "LoraLoader",
         "inputs": {
-            "model": ["3", 0],
-            "clip": ["3", 1],
+            "model": ["4", 0],
+            "clip": ["4", 1],
             "lora_name": "{{LORA1}}",
             "strength_model": 1.0,
             "strength_clip": 1.0
         }
     },
     "6": {
-        "class_type": "LoraLoader",
-        "inputs": {
-            "model": ["5", 0],
-            "clip": ["5", 1],
-            "lora_name": "{{LORA2}}",
-            "strength_model": 1.0,
-            "strength_clip": 1.0
-        }
-    },
-    "7": {
-        "class_type": "LoraLoader",
-        "inputs": {
-            "model": ["6", 0],
-            "clip": ["6", 1],
-            "lora_name": "{{LORA3}}",
-            "strength_model": 1.0,
-            "strength_clip": 1.0
-        }
-    },
-    "8": {
-        "class_type": "LoraLoader",
-        "inputs": {
-            "model": ["7", 0],
-            "clip": ["7", 1],
-            "lora_name": "{{LORA4}}",
-            "strength_model": 1.0,
-            "strength_clip": 1.0
-        }
-    },
-    "10": {
         "class_type": "CLIPTextEncode",
         "inputs": {
-            "clip": ["8", 1],
+            "clip": ["35", 1],
             "text": "{{POSITIVE}}"
         }
     },
-    "11": {
+    "7": {
         "class_type": "CLIPTextEncode",
         "inputs": {
-            "clip": ["8", 1],
+            "clip": ["35", 1],
             "text": "{{NEGATIVE}}"
         }
     },
-    "12": {
+    "5": {
         "class_type": "EmptyLatentImage",
         "inputs": {
             "width": 1216,
@@ -95,13 +66,13 @@ const HARDCODED_WORKFLOW = {
             "batch_size": 1
         }
     },
-    "13": {
+    "3": {
         "class_type": "KSampler",
         "inputs": {
-            "model": ["8", 0],
-            "positive": ["10", 0],
-            "negative": ["11", 0],
-            "latent_image": ["12", 0],
+            "model": ["35", 0],
+            "positive": ["6", 0],
+            "negative": ["7", 0],
+            "latent_image": ["5", 0],
             "seed": -1,
             "steps": 24,
             "cfg": 5.5,
@@ -110,18 +81,17 @@ const HARDCODED_WORKFLOW = {
             "denoise": 1.0
         }
     },
-    "14": {
+    "8": {
         "class_type": "VAEDecode",
         "inputs": {
-            "vae": ["3", 2],
-            "samples": ["13", 0]
+            "vae": ["4", 2],
+            "samples": ["3", 0]
         }
     },
-    "15": {
-        "class_type": "SaveImage",
+    "14": {
+        "class_type": "PreviewImage",
         "inputs": {
-            "images": ["14", 0],
-            "filename_prefix": "vnbg"
+            "images": ["8", 0]
         }
     }
 };
@@ -227,49 +197,20 @@ function buildWorkflowPrompt(positivePrompt) {
     const s = extension_settings[extensionName];
     const workflow = JSON.parse(JSON.stringify(HARDCODED_WORKFLOW));
 
-    // Inject model
-    workflow["3"].inputs.ckpt_name = s.selectedModel;
+    // Inject model (node 4 = CheckpointLoaderSimple)
+    workflow["4"].inputs.ckpt_name = s.selectedModel;
 
-    // LoRA configuration
-    const loras = [
-        { name: s.selectedLora, wt: s.selectedLoraWt, nodeId: "5", prevModel: ["3", 0], prevClip: ["3", 1] },
-        { name: s.selectedLora2, wt: s.selectedLoraWt2, nodeId: "6", prevModel: ["5", 0], prevClip: ["5", 1] },
-        { name: s.selectedLora3, wt: s.selectedLoraWt3, nodeId: "7", prevModel: ["6", 0], prevClip: ["6", 1] },
-        { name: s.selectedLora4, wt: s.selectedLoraWt4, nodeId: "8", prevModel: ["7", 0], prevClip: ["7", 1] }
-    ];
+    // LoRA configuration (node 35 = LoraLoader) - use "None" if not selected (like Dev-3)
+    workflow["35"].inputs.lora_name = s.selectedLora || "None";
+    workflow["35"].inputs.strength_model = s.selectedLoraWt || 1.0;
+    workflow["35"].inputs.strength_clip = s.selectedLoraWt || 1.0;
 
-    // Track the last valid model/clip outputs for rewiring
-    let lastModelOutput = ["3", 0];
-    let lastClipOutput = ["3", 1];
+    // Inject prompts (node 6 = positive, node 7 = negative)
+    workflow["6"].inputs.text = positivePrompt;
+    workflow["7"].inputs.text = HARDCODED_NEGATIVE;
 
-    loras.forEach((lora, i) => {
-        const nodeId = lora.nodeId;
-        if (lora.name && lora.name !== "" && lora.name !== "None") {
-            // Keep this LoRA node, update its inputs
-            workflow[nodeId].inputs.lora_name = lora.name;
-            workflow[nodeId].inputs.strength_model = lora.wt;
-            workflow[nodeId].inputs.strength_clip = lora.wt;
-            workflow[nodeId].inputs.model = lastModelOutput;
-            workflow[nodeId].inputs.clip = lastClipOutput;
-            lastModelOutput = [nodeId, 0];
-            lastClipOutput = [nodeId, 1];
-        } else {
-            // Remove unused LoRA node
-            delete workflow[nodeId];
-        }
-    });
-
-    // Rewire downstream nodes to use the last valid model/clip
-    workflow["10"].inputs.clip = lastClipOutput;  // Positive prompt CLIP
-    workflow["11"].inputs.clip = lastClipOutput;  // Negative prompt CLIP
-    workflow["13"].inputs.model = lastModelOutput; // KSampler model
-
-    // Inject prompts
-    workflow["10"].inputs.text = positivePrompt;
-    workflow["11"].inputs.text = HARDCODED_NEGATIVE;
-
-    // Random seed
-    workflow["13"].inputs.seed = Math.floor(Math.random() * 2147483647);
+    // Random seed (node 3 = KSampler)
+    workflow["3"].inputs.seed = Math.floor(Math.random() * 2147483647);
 
     return workflow;
 }
