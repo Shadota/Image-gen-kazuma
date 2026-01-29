@@ -462,45 +462,17 @@ async function generateWithComfy(positivePrompt) {
     // Build workflow with injected parameters
     const workflow = buildWorkflowPrompt(positivePrompt);
 
-    console.log(`[${extensionName}] Sending workflow to ComfyUI:`, JSON.stringify(workflow, null, 2));
+    console.log(`[${extensionName}] Sending workflow to ComfyUI`);
 
     try {
-        // Try using SillyTavern's proxy first (handles validation better)
-        let data;
-        let useDirectConnection = false;
-
-        try {
-            const proxyRes = await fetch('/api/sd/comfy/generate', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({
-                    url: comfyUrl,
-                    prompt: workflow
-                })
-            });
-
-            if (proxyRes.ok) {
-                data = await proxyRes.json();
-                console.log(`[${extensionName}] Proxy response:`, data);
-            } else {
-                console.log(`[${extensionName}] Proxy failed, trying direct connection...`);
-                useDirectConnection = true;
-            }
-        } catch (proxyErr) {
-            console.log(`[${extensionName}] Proxy not available, using direct connection:`, proxyErr.message);
-            useDirectConnection = true;
-        }
-
-        // Fallback to direct ComfyUI connection
-        if (useDirectConnection) {
-            const res = await fetch(`${comfyUrl}/prompt`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt: workflow })
-            });
-            data = await res.json();
-            console.log(`[${extensionName}] Direct ComfyUI response:`, data);
-        }
+        // Direct connection to ComfyUI
+        const res = await fetch(`${comfyUrl}/prompt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: workflow })
+        });
+        const data = await res.json();
+        console.log(`[${extensionName}] ComfyUI response:`, data);
 
         // Log node_errors first for debugging
         if (data.node_errors && Object.keys(data.node_errors).length > 0) {
