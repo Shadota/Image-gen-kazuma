@@ -801,24 +801,40 @@ jQuery(async () => {
         // Load HTML template
         await $.get(`${extensionFolderPath}/example.html`).then(h => $("#extensions_settings2").append(h));
 
-        // Add regenerate background button to left side of chat input (near extensions menu)
-        const regenBtn = $(`
-            <div id="kazuma_regen_btn" class="interactable" tabindex="0"
-                 title="Generate VN Background"
-                 style="cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                <i class="fa-solid fa-panorama"></i>
+        // Add regenerate background button to the extensions menu area
+        const regenBtnHtml = `
+            <div id="kazuma_regen_btn" class="list-group-item flex-container flexGap5 interactable" tabindex="0" title="Generate VN Background">
+                <i class="fa-solid fa-panorama extensionsMenuExtensionButton"></i>
             </div>
-        `);
-        regenBtn.on("click", () => {
-            if (!extension_settings[extensionName].enabled) {
-                toastr.warning("VN Background Gen is disabled");
-                return;
+        `;
+
+        // Try to add to the extensions menu (wand menu dropdown)
+        const addRegenButton = () => {
+            if ($("#kazuma_regen_btn").length > 0) return; // Already added
+
+            // Add to the data_holder or extensionsMenu area
+            const $extensionsMenu = $("#extensionsMenu");
+            if ($extensionsMenu.length > 0) {
+                $extensionsMenu.append(regenBtnHtml);
+                $("#kazuma_regen_btn").on("click", () => {
+                    if (!extension_settings[extensionName].enabled) {
+                        toastr.warning("VN Background Gen is disabled");
+                        return;
+                    }
+                    console.log(`[${extensionName}] Manual background generation triggered`);
+                    onGeneratePrompt();
+                });
+                console.log(`[${extensionName}] Regen button added to extensions menu`);
             }
-            console.log(`[${extensionName}] Manual background generation triggered`);
-            onGeneratePrompt();
-        });
-        // Insert into left send form area
-        $("#leftSendForm").append(regenBtn);
+        };
+
+        // Try immediately and also observe for DOM changes
+        addRegenButton();
+        const observer = new MutationObserver(() => addRegenButton());
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Stop observing after 10 seconds to avoid performance issues
+        setTimeout(() => observer.disconnect(), 10000);
 
         // Bind event handlers
         $("#kazuma_enable").on("change", (e) => {
