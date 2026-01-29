@@ -449,6 +449,7 @@ async function generateScenePrompt(sceneText) {
 
 async function onGeneratePrompt() {
     if (!extension_settings[extensionName].enabled) return;
+    if (isGenerating) return;
 
     const context = getContext();
     if (!context.chat || context.chat.length === 0) {
@@ -464,10 +465,18 @@ async function onGeneratePrompt() {
     }
 
     if (!s.selectedModel) {
-        toastr.error("No checkpoint selected. Please select a model.");
+        toastr.error("No checkpoint selected. Please select a model in the extension settings.");
         return;
     }
 
+    // Validate model exists in dropdown (helps catch stale selections)
+    const modelExists = $("#kazuma_model_list option").filter((_, el) => el.value === s.selectedModel).length > 0;
+    if (!modelExists) {
+        console.warn(`[${extensionName}] Selected model "${s.selectedModel}" not found in dropdown. Refreshing lists...`);
+        await fetchComfyLists();
+    }
+
+    isGenerating = true;
     showKazumaProgress("Extracting Scene...");
 
     try {
@@ -487,6 +496,8 @@ async function onGeneratePrompt() {
         hideKazumaProgress();
         console.error(err);
         toastr.error(`Generation failed: ${err.message}`);
+    } finally {
+        isGenerating = false;
     }
 }
 
@@ -496,6 +507,8 @@ async function generateWithComfy(positivePrompt) {
     // Build workflow with injected parameters
     const workflow = buildWorkflowPrompt(positivePrompt);
 
+    console.log(`[${extensionName}] Sending workflow to ComfyUI:`, JSON.stringify(workflow, null, 2));
+
     try {
         const res = await fetch(`${url}/prompt`, {
             method: "POST",
@@ -503,13 +516,46 @@ async function generateWithComfy(positivePrompt) {
             body: JSON.stringify({ prompt: workflow })
         });
 
-        if (!res.ok) throw new Error("Failed to submit job to ComfyUI");
-
         const data = await res.json();
+        console.log(`[${extensionName}] ComfyUI response:`, data);
+
+        // Check for validation errors in response (ComfyUI returns these in various formats)
+        if (data.error) {
+            console.error(`[${extensionName}] ComfyUI error:`, data.error);
+            const errorMsg = typeof data.error === 'string' ? data.error :
+                             (data.error.message || JSON.stringify(data.error));
+
+            if (errorMsg.includes('not in []') || errorMsg.includes('not in list')) {
+                throw new Error("ComfyUI model list is empty. Please refresh ComfyUI (click Refresh in ComfyUI sidebar) and click Test Connection.");
+            }
+            throw new Error(errorMsg);
+        }
+
+        if (data.node_errors && Object.keys(data.node_errors).length > 0) {
+            console.error(`[${extensionName}] Node errors:`, data.node_errors);
+            const errorDetails = JSON.stringify(data.node_errors);
+
+            if (errorDetails.includes('not in []') || errorDetails.includes('not in list')) {
+                throw new Error("ComfyUI model list is empty. Please refresh ComfyUI (click Refresh in ComfyUI sidebar) and click Test Connection.");
+            }
+            throw new Error(`Workflow validation failed - check ComfyUI console`);
+        }
+
+        if (!data.prompt_id) {
+            console.error(`[${extensionName}] No prompt_id in response:`, data);
+            const fullResponse = JSON.stringify(data);
+
+            if (fullResponse.includes('not in []') || fullResponse.includes('not in list')) {
+                throw new Error("ComfyUI model list is empty. Please refresh ComfyUI (click Refresh in ComfyUI sidebar) and click Test Connection.");
+            }
+            throw new Error("ComfyUI rejected the workflow - check ComfyUI console for details");
+        }
+
         await waitForGeneration(url, data.prompt_id, positivePrompt);
     } catch (e) {
         hideKazumaProgress();
         toastr.error("ComfyUI Error: " + e.message);
+        console.error(`[${extensionName}] Full error:`, e);
     }
 }
 
@@ -669,6 +715,10 @@ async function fetchComfyLists() {
 
 // === MESSAGE HANDLER (Auto-generate on every AI message) ===
 
+let isGenerating = false;
+let lastGenerationTime = 0;
+const GENERATION_COOLDOWN = 5000; // 5 second cooldown between generations
+
 function onMessageReceived(id) {
     const s = extension_settings[extensionName];
     if (!s?.enabled) return;
@@ -680,7 +730,21 @@ function onMessageReceived(id) {
     // Only trigger on AI messages (not user, not system)
     if (lastMsg.is_user || lastMsg.is_system) return;
 
+    // Prevent concurrent generations
+    if (isGenerating) {
+        console.log(`[${extensionName}] Skipping - generation already in progress`);
+        return;
+    }
+
+    // Enforce cooldown
+    const now = Date.now();
+    if (now - lastGenerationTime < GENERATION_COOLDOWN) {
+        console.log(`[${extensionName}] Skipping - cooldown active`);
+        return;
+    }
+
     console.log(`[${extensionName}] Auto-generating background...`);
+    lastGenerationTime = now;
     setTimeout(onGeneratePrompt, 500);
 }
 
