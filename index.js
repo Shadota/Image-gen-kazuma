@@ -200,10 +200,19 @@ function buildWorkflowPrompt(positivePrompt) {
     // Inject model (node 4 = CheckpointLoaderSimple)
     workflow["4"].inputs.ckpt_name = s.selectedModel;
 
-    // LoRA configuration (node 35 = LoraLoader) - use "None" if not selected (like Dev-3)
-    workflow["35"].inputs.lora_name = s.selectedLora || "None";
-    workflow["35"].inputs.strength_model = s.selectedLoraWt || 1.0;
-    workflow["35"].inputs.strength_clip = s.selectedLoraWt || 1.0;
+    // LoRA configuration
+    if (s.selectedLora && s.selectedLora !== "" && s.selectedLora !== "None") {
+        // Use LoRA
+        workflow["35"].inputs.lora_name = s.selectedLora;
+        workflow["35"].inputs.strength_model = s.selectedLoraWt || 1.0;
+        workflow["35"].inputs.strength_clip = s.selectedLoraWt || 1.0;
+    } else {
+        // No LoRA - remove node 35 and rewire to use checkpoint directly
+        delete workflow["35"];
+        workflow["6"].inputs.clip = ["4", 1];  // CLIP from checkpoint
+        workflow["7"].inputs.clip = ["4", 1];  // CLIP from checkpoint
+        workflow["3"].inputs.model = ["4", 0]; // Model from checkpoint
+    }
 
     // Inject prompts (node 6 = positive, node 7 = negative)
     workflow["6"].inputs.text = positivePrompt;
