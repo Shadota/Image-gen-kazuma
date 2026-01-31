@@ -587,8 +587,8 @@ async function insertImageToChat(imgUrl) {
         const blob = await response.blob();
         let base64FullURL = await blobToBase64(blob);
 
-        // Always compress to JPEG 0.9
-        base64FullURL = await compressImage(base64FullURL, 'jpeg', 0.9);
+        // Compress to JPEG 0.95 for better quality
+        base64FullURL = await compressImage(base64FullURL, 'jpeg', 0.95);
 
         // Always save as background
         await saveAsBackground(base64FullURL);
