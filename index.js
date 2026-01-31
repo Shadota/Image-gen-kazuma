@@ -93,7 +93,7 @@ const HARDCODED_WORKFLOW = {
         "inputs": {
             "image": ["8", 0],
             "upscale_method": "lanczos",
-            "scale_by": 1.25
+            "scale_by": 2.0
         }
     },
     "14": {
