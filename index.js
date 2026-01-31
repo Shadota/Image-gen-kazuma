@@ -558,7 +558,7 @@ async function saveAsBackground(base64FullURL) {
         const fetchRes = await fetch(base64FullURL);
         const blob = await fetchRes.blob();
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const filename = `vnbg_${timestamp}.jpg`;
+        const filename = `vnbg_${timestamp}.png`;
 
         const formData = new FormData();
         formData.set('avatar', blob, filename);
@@ -587,8 +587,7 @@ async function insertImageToChat(imgUrl) {
         const blob = await response.blob();
         let base64FullURL = await blobToBase64(blob);
 
-        // Compress to JPEG 0.95 for better quality
-        base64FullURL = await compressImage(base64FullURL, 'jpeg', 0.95);
+        // No compression - keep original quality from ComfyUI
 
         // Always save as background
         await saveAsBackground(base64FullURL);
