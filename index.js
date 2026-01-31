@@ -61,8 +61,8 @@ const HARDCODED_WORKFLOW = {
     "5": {
         "class_type": "EmptyLatentImage",
         "inputs": {
-            "width": 1216,
-            "height": 832,
+            "width": 1344,
+            "height": 768,
             "batch_size": 1
         }
     },
