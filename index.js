@@ -112,7 +112,8 @@ const defaultSettings = {
     selectedLoraWt4: 1.0,
     tagApiEndpoint: "",
     tagApiKey: "",
-    tagModel: ""
+    tagModel: "",
+    contextMessageCount: 5
 };
 
 // === SCENE EXTRACTION CONFIG ===
@@ -120,32 +121,34 @@ const SCENE_SYSTEM_PROMPT = `You extract scene settings from roleplay conversati
 
 Output ONLY valid JSON with these fields:
 {
-  "location": "specific place as a danbooru tag (e.g. bedroom, forest, classroom, rooftop, city_street, cafe)",
+  "location": "pick ONE from the LOCATION LIST below",
   "time_of_day": "one of: morning, day, afternoon, evening, night, dawn, dusk",
   "weather": "one of: clear, cloudy, rain, snow, fog, storm, wind, none",
-  "mood": "lighting and atmosphere as comma-separated tags (e.g. warm_ambient_lighting, soft_shadows, volumetric_lighting)",
-  "key_elements": "notable background objects/architecture as comma-separated tags (e.g. bookshelf, marble_floor, ornate_furniture, tall_windows)"
+  "mood": "1-3 from MOOD LIST below",
+  "key_elements": "3-6 from ELEMENTS LIST below"
 }
 
+LOCATION LIST (pick the closest match):
+indoors: bedroom, living_room, kitchen, bathroom, hallway, library, classroom, office, hospital_room, church, temple, shrine, castle, castle_interior, throne_room, dungeon, prison_cell, basement, attic, warehouse, factory, laboratory, bar, restaurant, cafe, shop, hotel_room, train_interior, spaceship_interior, cockpit, bridge_(ship)
+outdoors: forest, mountain, beach, ocean, lake, river, waterfall, cave, desert, field, meadow, garden, park, cemetery, ruins, city, street, alley, rooftop, balcony, bridge, train_station, harbor, airport, battlefield, arena, campsite, village, farm
+
+MOOD LIST (lighting/atmosphere):
+warm_lighting, dim_lighting, bright, dark, candlelight, moonlight, sunlight, dramatic_lighting, soft_lighting, neon_lights, firelight, torchlight, backlight, volumetric_lighting
+
+ELEMENTS LIST (visual only):
+stone_walls, wooden_floor, marble_floor, carpet, brick_wall, window, door, stairs, fireplace, chandelier, candle, torch, lantern, bookshelf, table, chair, bed, sofa, desk, throne, altar, pillar, column, curtains, tapestry, painting, mirror, clock, fountain, statue, gate, fence, tree, grass, flowers, water, rocks, clouds, moon, stars
+
 RULES:
-- Use the MOST RECENT scene description in the conversation
-- If a location change happened, use the NEW location
-- Use underscores for multi-word tags
-- Prefer specific booru/danbooru tags over vague descriptions
-- "mood" should describe LIGHTING and ATMOSPHERE, not emotions
-- "key_elements" should describe ARCHITECTURAL details, MATERIALS, FURNITURE, and NATURAL elements
-- Include material descriptions in key_elements (marble, wood, glass, stone, etc.)
-- Do NOT include character descriptions — only the environment
+- INFER the location from context. "Countess" + "stone halls" + "robed figures" = castle_interior
+- Pick elements that match what's described or implied
+- NO made-up terms, NO character descriptions
 
 EXAMPLES:
-1. *They walk into the dimly lit library, rain pattering against tall windows*
-{"location":"library","time_of_day":"evening","weather":"rain","mood":"dim_lighting, warm_ambient_lighting, soft_shadows","key_elements":"bookshelf, tall_windows, rain, wooden_floor, chandelier"}
+1. *The robed woman leads you through stone corridors. "The Countess will see you soon."*
+{"location":"castle_interior","time_of_day":"evening","weather":"none","mood":"dim_lighting, candlelight","key_elements":"stone_walls, torch, door, pillar, tapestry"}
 
-2. *The morning sun bathes the rooftop in golden light as cherry blossoms drift by*
-{"location":"rooftop","time_of_day":"morning","weather":"clear","mood":"golden_hour, cinematic_lighting, volumetric_lighting, atmospheric_haze","key_elements":"cherry_blossoms, railing, blue_sky, cityscape, fence"}
-
-3. *She enters the grand ballroom, marble floors reflecting crystal chandeliers*
-{"location":"ballroom","time_of_day":"evening","weather":"none","mood":"warm_ambient_lighting, professional_lighting, soft_shadows, volumetric_lighting","key_elements":"marble_floor, crystal_chandeliers, ornate_furniture, decorative_columns, tall_windows"}`;
+2. *They walk into the dimly lit library, rain pattering against tall windows*
+{"location":"library","time_of_day":"evening","weather":"rain","mood":"dim_lighting, warm_lighting","key_elements":"bookshelf, window, wooden_floor, chandelier, chair"}`;
 
 const SCENE_TAG_GEN_CONFIG = {
     temperature: 0.15,
@@ -437,12 +440,37 @@ async function onGeneratePrompt() {
     showKazumaProgress("Extracting Scene...");
 
     try {
-        const NUM_CONTEXT_MESSAGES = 5;
-        const recentMessages = context.chat.slice(-NUM_CONTEXT_MESSAGES)
-            .map(msg => `${msg.is_user ? 'User' : 'Character'}: ${msg.mes}`)
-            .join('\n\n');
+        const contextCount = s.contextMessageCount || 5;
+        const chatLength = context.chat.length;
 
-        const sceneText = `Analyze the conversation below. Determine the CURRENT SCENE/SETTING where the action is taking place.\n\n${recentMessages}`;
+        // Main message (most recent)
+        const mainMsg = context.chat[chatLength - 1];
+        const mainMessageText = `${mainMsg.is_user ? 'User' : 'Character'}: ${mainMsg.mes}`;
+
+        // Context messages (previous N, excluding the main message)
+        let contextText = '';
+        if (contextCount > 0 && chatLength > 1) {
+            const startIdx = Math.max(0, chatLength - 1 - contextCount);
+            const contextMessages = context.chat.slice(startIdx, chatLength - 1)
+                .map(msg => `${msg.is_user ? 'User' : 'Character'}: ${msg.mes}`)
+                .join('\n\n');
+            contextText = contextMessages;
+        }
+
+        // Build prompt with clear structure
+        const sceneText = contextCount > 0 && contextText
+            ? `Analyze the conversation to determine the CURRENT SCENE/SETTING.
+
+=== CONTEXT (previous messages for background understanding) ===
+${contextText}
+
+=== MAIN MESSAGE (most recent - this takes priority) ===
+${mainMessageText}
+
+IMPORTANT: The MAIN MESSAGE reflects the current state. If there's any conflict between context and the main message (e.g., location changed), use the MAIN MESSAGE.`
+            : `Analyze the message below. Determine the CURRENT SCENE/SETTING.
+
+${mainMessageText}`;
 
         const generatedText = await generateScenePrompt(sceneText);
 
@@ -750,6 +778,10 @@ async function loadSettings() {
     $("#kazuma_lora_wt_4").val(s.selectedLoraWt4);
     $("#kazuma_lora_wt_display_4").text(s.selectedLoraWt4);
 
+    // Context message count
+    $("#kazuma_context_count").val(s.contextMessageCount);
+    $("#kazuma_context_count_display").text(s.contextMessageCount);
+
     await fetchComfyLists();
 }
 
@@ -891,6 +923,14 @@ jQuery(async () => {
             let v = parseFloat($(e.target).val());
             extension_settings[extensionName].selectedLoraWt4 = v;
             $("#kazuma_lora_wt_display_4").text(v);
+            saveSettingsDebounced();
+        });
+
+        // Context message count slider
+        $("#kazuma_context_count").on("input", (e) => {
+            let v = parseInt($(e.target).val());
+            extension_settings[extensionName].contextMessageCount = v;
+            $("#kazuma_context_count_display").text(v);
             saveSettingsDebounced();
         });
 

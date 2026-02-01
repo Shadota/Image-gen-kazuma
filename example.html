@@ -16,6 +16,13 @@
                     <span><i class="fa-solid fa-rotate"></i> Auto-generate on message</span>
                     <input type="checkbox" id="kazuma_auto_gen" />
                 </label>
+                <div class="kazuma-slider-row" style="margin-top:15px;">
+                    <span><i class="fa-solid fa-clock-rotate-left"></i> Context Messages: <span id="kazuma_context_count_display">5</span></span>
+                    <input type="range" id="kazuma_context_count" min="0" max="20" step="1" value="5">
+                </div>
+                <div class="kazuma-hint" style="font-size:0.85em; opacity:0.7; margin-top:2px;">
+                    Number of previous messages to include as context (0 = main message only)
+                </div>
             </div>
 
             <!-- Scene Extraction API -->
