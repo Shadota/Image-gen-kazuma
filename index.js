@@ -180,8 +180,8 @@ const SCENE_ANALYSIS_CONFIG = {
     top_p: 0.9,
     frequency_penalty: 0,
     presence_penalty: 0,
-    max_tokens: 400,
-    assistantPrefill: '{"'
+    max_tokens: 400
+    // NO assistantPrefill - causes issues with thinking models
 };
 
 const TAG_GENERATION_CONFIG = {
@@ -191,6 +191,26 @@ const TAG_GENERATION_CONFIG = {
     presence_penalty: 0,
     max_tokens: 200
 };
+
+// Valid booru tags for filtering Layer 2 output
+const VALID_BOORU_TAGS = new Set([
+    // Setting type
+    'indoors', 'outdoors', 'castle', 'mansion', 'temple', 'shrine', 'church', 'school', 'classroom', 'library', 'bedroom', 'living_room', 'kitchen', 'bathroom', 'hallway', 'dungeon', 'prison', 'cave', 'forest', 'mountain', 'beach', 'ocean', 'lake', 'river', 'city', 'street', 'alley', 'rooftop', 'balcony', 'garden', 'park', 'ruins', 'spaceship', 'laboratory', 'hospital', 'office', 'restaurant', 'cafe', 'bar', 'shop', 'train_interior', 'bridge',
+    // Architecture
+    'gothic_architecture', 'japanese_architecture', 'modern_architecture', 'medieval', 'victorian', 'art_deco', 'futuristic', 'rustic', 'ornate', 'minimalist', 'ancient',
+    // Materials
+    'stone_wall', 'stone_floor', 'brick_wall', 'wooden_floor', 'marble_floor', 'tatami', 'carpet', 'concrete', 'metal', 'glass',
+    // Lighting
+    'candlelight', 'torchlight', 'moonlight', 'sunlight', 'dim_lighting', 'bright', 'dark', 'dramatic_lighting', 'soft_lighting', 'backlight', 'volumetric_lighting', 'neon_lights', 'firelight', 'lantern',
+    // Time/sky
+    'day', 'night', 'morning', 'evening', 'sunset', 'sunrise', 'dawn', 'dusk', 'twilight', 'blue_sky', 'night_sky', 'cloudy_sky', 'starry_sky', 'orange_sky',
+    // Weather
+    'rain', 'snow', 'fog', 'mist', 'storm', 'wind', 'clear_sky', 'overcast',
+    // Atmosphere
+    'atmospheric', 'ominous', 'peaceful', 'cozy', 'eerie', 'mystical', 'romantic', 'melancholic', 'tense', 'serene',
+    // Objects
+    'window', 'door', 'stairs', 'fireplace', 'chandelier', 'candle', 'torch', 'bookshelf', 'table', 'chair', 'bed', 'sofa', 'desk', 'throne', 'altar', 'pillar', 'column', 'curtains', 'tapestry', 'painting', 'mirror', 'clock', 'fountain', 'statue', 'gate', 'fence', 'tree', 'grass', 'flowers'
+]);
 
 // === HELPER FUNCTIONS ===
 
@@ -332,6 +352,13 @@ async function callSceneLLM(systemPrompt, userContent, config, useAssistantPrefi
     return result;
 }
 
+// Extract valid tags from Layer 2 output
+function extractValidTags(output) {
+    const potentialTags = output.toLowerCase().match(/[a-z][a-z0-9_]*/g) || [];
+    const validTags = potentialTags.filter(tag => VALID_BOORU_TAGS.has(tag));
+    return [...new Set(validTags)].join(', ');
+}
+
 async function generateScenePrompt(sceneText) {
     const s = extension_settings[extensionName];
 
@@ -345,22 +372,34 @@ async function generateScenePrompt(sceneText) {
         SCENE_ANALYSIS_PROMPT,
         sceneText,
         SCENE_ANALYSIS_CONFIG,
-        true // use assistant prefill for JSON
+        false // no prefill - causes issues with thinking models
     );
 
-    // Prepend assistant prefill if needed for JSON parsing
-    if (SCENE_ANALYSIS_CONFIG.assistantPrefill && !analysisResult.trim().startsWith('{')) {
-        analysisResult = SCENE_ANALYSIS_CONFIG.assistantPrefill + analysisResult;
-    }
-
-    // Extract JSON from Layer 1
+    // Extract JSON from Layer 1 - find the LAST complete JSON object
+    // (model may output partial JSON before thinking, then full JSON after)
     let jsonStr = analysisResult;
     const jsonMatch = analysisResult.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) {
         jsonStr = jsonMatch[1].trim();
     } else {
-        const objMatch = analysisResult.match(/\{[\s\S]*?\}/);
-        if (objMatch) jsonStr = objMatch[0];
+        // Find all complete JSON objects by tracking brace depth
+        const jsonObjects = [];
+        let depth = 0, start = -1;
+        for (let i = 0; i < analysisResult.length; i++) {
+            if (analysisResult[i] === '{') {
+                if (depth === 0) start = i;
+                depth++;
+            } else if (analysisResult[i] === '}') {
+                depth--;
+                if (depth === 0 && start !== -1) {
+                    jsonObjects.push(analysisResult.slice(start, i + 1));
+                    start = -1;
+                }
+            }
+        }
+        if (jsonObjects.length > 0) {
+            jsonStr = jsonObjects[jsonObjects.length - 1]; // Use last complete JSON
+        }
     }
 
     let sceneAnalysis;
@@ -368,7 +407,6 @@ async function generateScenePrompt(sceneText) {
         sceneAnalysis = JSON.parse(jsonStr);
     } catch (e) {
         console.error(`[${extensionName}] Layer 1 JSON parse failed: ${jsonStr}`);
-        // Fallback: use raw text as description
         sceneAnalysis = {
             location_type: "unknown location",
             architecture: "unspecified",
@@ -386,16 +424,20 @@ async function generateScenePrompt(sceneText) {
     const tagPrompt = `Scene description:
 ${JSON.stringify(sceneAnalysis, null, 2)}`;
 
-    const tags = await callSceneLLM(
+    const rawTags = await callSceneLLM(
         TAG_GENERATION_PROMPT,
         tagPrompt,
         TAG_GENERATION_CONFIG,
-        false // no assistant prefill for tag output
+        false
     );
 
-    console.log(`[${extensionName}] Layer 2 Output (raw tags): ${tags}`);
+    console.log(`[${extensionName}] Layer 2 Raw Output: ${rawTags}`);
 
-    // Build final prompt with base tags + LLM tags + quality tags
+    // Filter to only valid booru tags
+    const tags = extractValidTags(rawTags);
+    console.log(`[${extensionName}] Layer 2 Valid Tags: ${tags}`);
+
+    // Build final prompt
     const prompt = buildBackgroundPrompt(tags);
     console.log(`[${extensionName}] Final prompt: ${prompt}`);
 
